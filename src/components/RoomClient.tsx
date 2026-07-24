@@ -185,23 +185,47 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       }
     });
 
-    channel.subscribe((status: string) => {
-      if (status === 'SUBSCRIBED') {
-        const isFirst = users.length === 0;
-        channel.track({
-          username,
-          color,
-          joinedAt: new Date().toISOString(),
-          isHost: isFirst
-        });
+    channel.subscribe((status: string, error?: any) => {
+      console.log('[Supabase Realtime]', {
+        status,
+        error,
+        roomId,
+      });
 
-        setTimeout(() => {
-          channel.send({
-            type: 'broadcast',
-            event: 'request_sync',
-            payload: { senderTabId: channel.getTabId ? channel.getTabId() : 'new_tab' }
+      switch (status) {
+        case 'SUBSCRIBED': {
+          console.log('Realtime connected');
+          const isFirst = users.length === 0;
+          channel.track({
+            username,
+            color,
+            joinedAt: new Date().toISOString(),
+            isHost: isFirst
           });
-        }, 1000);
+
+          setTimeout(() => {
+            channel.send({
+              type: 'broadcast',
+              event: 'request_sync',
+              payload: { senderTabId: channel.getTabId ? channel.getTabId() : 'new_tab' }
+            });
+          }, 1000);
+          break;
+        }
+
+        case 'CHANNEL_ERROR':
+          console.error('Realtime channel error:', error);
+          addSystemMessage('❌ Lỗi kết nối Realtime: Kênh gặp sự cố. Kiểm tra cấu hình Supabase, mạng Internet hoặc VPN/Adblocker.', true);
+          break;
+
+        case 'TIMED_OUT':
+          console.error('Realtime connection timed out:', error);
+          addSystemMessage('⚠️ Hết hạn kết nối Realtime. Hệ thống đang tự động thử kết nối lại...', true);
+          break;
+
+        case 'CLOSED':
+          console.warn('Realtime channel closed:', error);
+          break;
       }
     });
 

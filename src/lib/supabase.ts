@@ -1,10 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+const supabaseKey = (
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+  ''
+).trim();
 
 // Kiểm tra xem đã cấu hình đầy đủ Supabase chưa
-export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
+export const isSupabaseConfigured = !!(supabaseUrl && supabaseKey);
+
+// Log thông tin cấu hình phục vụ chẩn đoán (không log toàn bộ key bảo mật)
+if (typeof window !== 'undefined') {
+  console.log('[Supabase Config Check]', {
+    supabaseUrl,
+    keyExists: Boolean(supabaseKey),
+    keyLength: supabaseKey.length,
+    keyPrefix: supabaseKey.slice(0, 12),
+    hasWhitespace: /\s/.test(supabaseKey),
+    isSupabaseConfigured,
+  });
+}
 
 // Singleton pattern để tránh việc Next.js dev tạo nhiều thực thể Supabase Client khi hot-reload
 const globalForSupabase = globalThis as unknown as {
@@ -13,10 +29,15 @@ const globalForSupabase = globalThis as unknown as {
 
 export const supabase = globalForSupabase.supabase || (
   isSupabaseConfigured 
-    ? createClient(supabaseUrl, supabaseAnonKey, {
+    ? createClient(supabaseUrl, supabaseKey, {
         auth: {
           persistSession: false, // Tắt session persistence nếu chỉ dùng để nghe nhạc
-        }
+        },
+        realtime: {
+          params: {
+            eventsPerSecond: 10,
+          },
+        },
       })
     : null
 );
