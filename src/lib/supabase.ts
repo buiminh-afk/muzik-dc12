@@ -59,7 +59,11 @@ class MockRealtimeChannel {
   }
 
   presenceState() {
-    return this._presenceState;
+    const formatted: Record<string, any[]> = {};
+    Object.keys(this._presenceState).forEach(key => {
+      formatted[key] = [this._presenceState[key]];
+    });
+    return formatted;
   }
 
   subscribe(callback?: (status: string) => void) {
