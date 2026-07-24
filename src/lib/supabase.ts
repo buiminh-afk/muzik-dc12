@@ -37,6 +37,17 @@ export const supabase = globalForSupabase.supabase || (
           params: {
             eventsPerSecond: 10,
           },
+          // Tăng thời gian chờ phản hồi bắt tay (handshake) lên 30s để tránh bị timeout do firewall/proxy kiểm tra gói tin
+          timeout: 30000,
+          // Rút ngắn khoảng thời gian gửi gói tin heartbeat giữ kết nối xuống 10s (mặc định là 25s)
+          // giúp duy trì kết nối qua các thiết bị mạng công ty vốn hay đóng các kết nối "idle"
+          heartbeatIntervalMs: 10000,
+          // Chiến lược tự động thử kết nối lại tối ưu hơn
+          reconnectAfterMs: (tries) => {
+            // Thử lại nhanh sau mỗi 1s trong 5 lần đầu để khôi phục kết nối sớm nhất có thể
+            // Sau đó giãn cách ra mỗi 5s để tránh spam server
+            return tries <= 5 ? 1000 : 5000;
+          }
         },
       })
     : null
