@@ -57,13 +57,14 @@ export default function QueueList({
             return (
               <div
                 key={item.id}
-                onClick={() => !isPlayingNow && onPlayIndex(index)}
+                onClick={() => !isPlayingNow && onMoveToTop(index)}
                 className={`group relative flex items-center gap-3 p-2.5 rounded-lg border transition-all duration-150 ${
                   isPlayingNow
                     ? 'bg-purple-500/10 border-purple-400/20'
                     : 'bg-white/[0.02] border-white/[0.05] hover:bg-white/[0.045] hover:border-white/10'
                 }`}
                 style={{ cursor: isPlayingNow ? 'default' : 'pointer' }}
+                title={isPlayingNow ? 'Đang phát' : index === 1 ? 'Bài phát tiếp theo' : 'Nhấn để đẩy lên phát tiếp'}
               >
                 {/* Number or Play indicator */}
                 <div className="w-5 text-center text-xs font-semibold text-muted animate-fade-in">
@@ -106,71 +107,6 @@ export default function QueueList({
                     Thêm bởi: <span className="text-neutral-300">{item.addedBy}</span>
                   </p>
                 </div>
-
-                {/* Item actions */}
-                {!isPlayingNow && (
-                  <div
-                    className="
-                      flex items-center gap-1
-                      opacity-0 lg:opacity-40
-                      group-hover:opacity-100
-                      transition-opacity
-                      shrink-0
-                    "
-                  >
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMoveToTop(index);
-                      }}
-                      className="
-                        w-7 h-7
-                        flex items-center justify-center
-                        rounded-md
-                        border border-white/5
-                        bg-white/[0.03]
-                        text-neutral-400
-                        transition-all
-                        hover:bg-purple-500/15
-                        hover:border-purple-400/20
-                        hover:text-purple-300
-                        active:scale-95
-                        cursor-pointer
-                      "
-                      title="Đưa lên phát tiếp"
-                      aria-label={`Đưa ${item.title} lên đầu hàng đợi`}
-                    >
-                      <ArrowUpToLine size={13} strokeWidth={2} />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveItem(item.id);
-                      }}
-                      className="
-                        w-7 h-7
-                        flex items-center justify-center
-                        rounded-md
-                        border border-transparent
-                        bg-transparent
-                        text-neutral-500
-                        transition-all
-                        hover:bg-rose-500/10
-                        hover:border-rose-400/15
-                        hover:text-rose-300
-                        active:scale-95
-                        cursor-pointer
-                      "
-                      title="Xóa khỏi hàng đợi"
-                      aria-label={`Xóa ${item.title} khỏi hàng đợi`}
-                    >
-                      <X size={14} strokeWidth={2.2} />
-                    </button>
-                  </div>
-                )}
               </div>
             );
           })

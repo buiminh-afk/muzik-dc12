@@ -885,42 +885,26 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       {/* WORKSPACE */}
       <div className="flex-1 min-h-0 grid grid-cols-1 lg-grid lg-grid-cols-12 gap-4 overflow-y-auto lg-overflow-hidden">
         
-        {/* LEFT COLUMN */}
-        <main className="glass-card lg-col-span-8 min-h-0 p-4 flex flex-col gap-4 overflow-hidden">
-          {/* Không để player tự phình vô hạn */}
-          <div 
-            className="shrink-0 overflow-hidden"
-            style={{ height: 'clamp(220px, 58vh, 650px)' }}
-          >
-            <YoutubePlayer
-              videoId={currentVideo ? currentVideo.videoId : null}
-              isPlaying={isPlaying}
-              seekTime={seekTime}
-              playlistIdToLoad={playlistIdToLoad}
-              onPlayerStateChange={handlePlayerStateChange}
-              onVideoEnded={handleVideoEnded}
-              onLocalSeek={handleLocalSeek}
-              onPlaylistLoaded={handlePlaylistLoaded}
-              onVideoTitleLoaded={handleVideoTitleLoaded}
-            />
-          </div>
-
-          {/* QUEUE SCROLL NỘI BỘ */}
-          <div className="flex-1 min-h-0 border-t border-white-5 pt-4 flex flex-col overflow-hidden">
-            <QueueList
-              queue={queue}
-              onRemoveItem={handleRemoveItem}
-              onPlayIndex={handlePlayIndex}
-              onMoveToTop={handleMoveToTop}
-            />
-          </div>
-        </main>
-
-        {/* RIGHT COLUMN */}
-        <aside className="lg-col-span-4 min-h-0 flex flex-col gap-4 overflow-hidden">
-          {/* Active Users */}
-          <div className="glass-card p-4 h-[140px] shrink-0 overflow-hidden">
-            <UsersList users={users} localRefId={localRefId} />
+        {/* LEFT COLUMN (Player & Chat) */}
+        <main className="lg-col-span-7 min-h-0 flex flex-col gap-4 overflow-hidden">
+          {/* Video Player */}
+          <div className="glass-card p-4 shrink-0 overflow-hidden">
+            <div 
+              className="shrink-0 overflow-hidden"
+              style={{ height: 'clamp(200px, 42vh, 480px)' }}
+            >
+              <YoutubePlayer
+                videoId={currentVideo ? currentVideo.videoId : null}
+                isPlaying={isPlaying}
+                seekTime={seekTime}
+                playlistIdToLoad={playlistIdToLoad}
+                onPlayerStateChange={handlePlayerStateChange}
+                onVideoEnded={handleVideoEnded}
+                onLocalSeek={handleLocalSeek}
+                onPlaylistLoaded={handlePlaylistLoaded}
+                onVideoTitleLoaded={handleVideoTitleLoaded}
+              />
+            </div>
           </div>
 
           {/* Chat & Commands */}
@@ -929,6 +913,24 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               messages={messages}
               onSendMessage={handleSendMessage}
               onCommand={handleCommand}
+            />
+          </div>
+        </main>
+
+        {/* RIGHT COLUMN (Users & Playlist) */}
+        <aside className="lg-col-span-5 min-h-0 flex flex-col gap-4 overflow-hidden">
+          {/* Active Users */}
+          <div className="glass-card p-4 h-[140px] shrink-0 overflow-hidden">
+            <UsersList users={users} localRefId={localRefId} />
+          </div>
+
+          {/* Playlist / QueueList */}
+          <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
+            <QueueList
+              queue={queue}
+              onRemoveItem={handleRemoveItem}
+              onPlayIndex={handlePlayIndex}
+              onMoveToTop={handleMoveToTop}
             />
           </div>
         </aside>
