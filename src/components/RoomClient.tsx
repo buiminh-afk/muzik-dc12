@@ -366,7 +366,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
         const newItem: PlaylistItem = {
           id: Math.random().toString(36).substring(2, 9),
-          videoId,
+          videoId: videoId!,
           title,
           thumbnail,
           addedBy: username,
