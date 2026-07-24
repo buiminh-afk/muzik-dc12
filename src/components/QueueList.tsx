@@ -57,14 +57,14 @@ export default function QueueList({
             return (
               <div
                 key={item.id}
-                onClick={() => !isPlayingNow && onMoveToTop(index)}
-                className={`group relative flex items-center gap-3 p-2.5 rounded-lg border transition-all duration-150 ${
+                onClick={() => !isPlayingNow && onPlayIndex(index)}
+                className={`group relative flex items-center gap-3.5 p-3.5 rounded-xl border transition-all duration-150 ${
                   isPlayingNow
-                    ? 'bg-purple-500/10 border-purple-400/20'
+                    ? 'bg-purple-500/10 border-purple-400/20 shadow-md'
                     : 'bg-white/[0.02] border-white/[0.05] hover:bg-white/[0.045] hover:border-white/10'
                 }`}
                 style={{ cursor: isPlayingNow ? 'default' : 'pointer' }}
-                title={isPlayingNow ? 'Đang phát' : index === 1 ? 'Bài phát tiếp theo' : 'Nhấn để đẩy lên phát tiếp'}
+                title={isPlayingNow ? 'Đang phát' : 'Nhấp để phát bài hát này ngay'}
               >
                 {/* Number or Play indicator */}
                 <div className="w-5 text-center text-xs font-semibold text-muted animate-fade-in">
@@ -81,7 +81,7 @@ export default function QueueList({
                 </div>
 
                 {/* Thumbnail */}
-                <div className="relative w-12 aspect-video rounded overflow-hidden bg-black flex-shrink-0">
+                <div className="relative w-16 aspect-video rounded overflow-hidden bg-black flex-shrink-0 shadow-md">
                   <img
                     src={item.thumbnail || `https://img.youtube.com/vi/${item.videoId}/default.jpg`}
                     alt={item.title}
@@ -107,6 +107,70 @@ export default function QueueList({
                     Thêm bởi: <span className="text-neutral-300">{item.addedBy}</span>
                   </p>
                 </div>
+
+                {/* Item actions - Luôn hiển thị ở độ mờ 70% và sáng lên 100% khi hover */}
+                {!isPlayingNow && (
+                  <div
+                    className="
+                      flex items-center gap-1.5
+                      opacity-70 group-hover:opacity-100
+                      transition-opacity
+                      shrink-0
+                    "
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onMoveToTop(index);
+                      }}
+                      className="
+                        w-8 h-8
+                        flex items-center justify-center
+                        rounded-lg
+                        border border-white-10
+                        bg-white-5
+                        text-neutral-300
+                        transition-all
+                        hover:bg-purple-500/20
+                        hover:border-purple-400/30
+                        hover:text-purple-300
+                        active:scale-95
+                        cursor-pointer
+                      "
+                      title="Đưa lên phát tiếp"
+                      aria-label={`Đưa ${item.title} lên đầu hàng đợi`}
+                    >
+                      <ArrowUpToLine size={13} strokeWidth={2} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveItem(item.id);
+                      }}
+                      className="
+                        w-8 h-8
+                        flex items-center justify-center
+                        rounded-lg
+                        border border-transparent
+                        bg-transparent
+                        text-neutral-400
+                        transition-all
+                        hover:bg-rose-500/15
+                        hover:border-rose-400/20
+                        hover:text-rose-300
+                        active:scale-95
+                        cursor-pointer
+                      "
+                      title="Xóa khỏi hàng đợi"
+                      aria-label={`Xóa ${item.title} khỏi hàng đợi`}
+                    >
+                      <X size={14} strokeWidth={2} />
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })
