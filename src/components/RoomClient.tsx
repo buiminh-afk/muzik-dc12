@@ -68,6 +68,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   // Ref của player để lấy thời gian hiện tại khi phản hồi sync
   const playerTimeRef = useRef<number>(0);
+  const usersRef = useRef<RoomUser[]>([]);
+  usersRef.current = users;
+  const localRefIdRef = useRef<string | null>(null);
+  localRefIdRef.current = localRefId;
 
   // ===== PERSISTENCE: Lưu/phục hồi hàng đợi từ localStorage =====
   const storageKey = `yt_together_room_${roomId}`;
@@ -150,7 +154,26 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         }
       })
       .on('broadcast', { event: 'request_sync' }, ({ payload }: any) => {
-        if (queueRef.current.length > 0) {
+        // Chỉ cho phép đúng 1 người gửi thông tin sync (Host hoặc người join cũ nhất)
+        // để tránh tình trạng nhiều người cùng phản hồi gây loạn/nhảy timeline ở client mới.
+        const activeUsers = usersRef.current;
+        if (activeUsers.length === 0 || queueRef.current.length === 0) return;
+
+        const host = activeUsers.find(u => u.isHost);
+        const myRefId = localRefIdRef.current;
+
+        let shouldISync = false;
+        if (host) {
+          shouldISync = host.presence_ref === myRefId;
+        } else {
+          // Nếu không có host rõ ràng, người có thời gian tham gia sớm nhất sẽ làm nhiệm vụ sync
+          const oldestUser = [...activeUsers].sort((a, b) => 
+            new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+          )[0];
+          shouldISync = oldestUser?.presence_ref === myRefId;
+        }
+
+        if (shouldISync) {
           channel.send({
             type: 'broadcast',
             event: 'sync_state',

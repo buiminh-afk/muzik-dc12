@@ -154,6 +154,18 @@ export default function YoutubePlayer({
             // Luôn bắt đầu phát khi player ready
             event.target.playVideo();
 
+            // Nếu có thời gian tua đang chờ (đồng bộ khi người dùng mới vào phòng)
+            if (pendingSeekRef.current !== null && pendingSeekRef.current > 0) {
+              const targetTime = pendingSeekRef.current;
+              pendingSeekRef.current = null; // Đã tiêu thụ
+              setTimeout(() => {
+                try {
+                  event.target.seekTo(targetTime, true);
+                  setCurrentTime(targetTime);
+                } catch (e) {}
+              }, 300);
+            }
+
             // Lấy tiêu đề
             try {
               const title = playerRef.current.getVideoData()?.title;
@@ -200,6 +212,18 @@ export default function YoutubePlayer({
           onReady: (event: any) => {
             setIsPlayerReady(true);
             setError(null);
+
+            // Nếu có thời gian tua đang chờ (đồng bộ khi người dùng mới vào phòng)
+            if (pendingSeekRef.current !== null && pendingSeekRef.current > 0) {
+              const targetTime = pendingSeekRef.current;
+              pendingSeekRef.current = null; // Đã tiêu thụ
+              setTimeout(() => {
+                try {
+                  event.target.seekTo(targetTime, true);
+                  setCurrentTime(targetTime);
+                } catch (e) {}
+              }, 300);
+            }
 
             setTimeout(() => {
               try {
