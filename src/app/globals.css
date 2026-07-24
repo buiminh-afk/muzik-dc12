@@ -421,3 +421,155 @@ body > div {
   .sm-w-auto { width: auto; }
   .sm-flex-none { flex: none; }
 }
+
+/* =============================================================
+   WARM LIGHT THEME OVERRIDES (PREMIUM EYE-FRIENDLY CREAM LIGHT MODE)
+   ============================================================= */
+body.light {
+  --bg-primary: #f6f5f0; /* Soft warm paper tone background */
+  --bg-secondary: rgba(0, 0, 0, 0.02);
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(0, 0, 0, 0.07);
+  --glass-highlight: rgba(0, 0, 0, 0.015);
+  
+  --accent-primary: #6d28d9; /* Deep purple */
+  --accent-primary-glow: rgba(109, 40, 217, 0.15);
+  --accent-secondary: #0891b2; /* Deep Cyan */
+  --accent-secondary-glow: rgba(8, 145, 178, 0.15);
+  --accent-pink: #be185d;
+  
+  --text-main: #242429; /* Soft charcoal-brown text */
+  --text-muted: #5e6470; /* Cool slate subtext */
+  --text-dark: #8c93a0;
+  
+  --shadow-main: 0 8px 32px 0 rgba(40, 40, 50, 0.05);
+}
+
+/* Background gradient overrides */
+body.light {
+  background-image: 
+    radial-gradient(at 10% 20%, rgba(124, 58, 237, 0.06) 0px, transparent 50%),
+    radial-gradient(at 90% 80%, rgba(6, 182, 212, 0.06) 0px, transparent 50%) !important;
+}
+
+/* Scrollbars for light mode */
+body.light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12) !important;
+}
+body.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22) !important;
+}
+
+/* Typography high-contrast overrides */
+body.light .text-white {
+  color: var(--text-main) !important;
+}
+body.light .text-neutral-200,
+body.light .text-neutral-300 {
+  color: var(--text-muted) !important;
+}
+body.light .text-purple-200 {
+  color: var(--accent-primary) !important;
+  font-weight: 600 !important;
+}
+body.light .text-purple-400 {
+  color: var(--accent-primary) !important;
+}
+body.light .text-cyan-400 {
+  color: var(--accent-secondary) !important;
+}
+
+/* Transparent backgrounds */
+body.light .bg-white-5,
+body.light .bg-white-02,
+body.light .bg-white-01,
+body.light .bg-white-04,
+body.light .bg-white-06 {
+  background-color: rgba(0, 0, 0, 0.025) !important;
+}
+body.light .bg-white-10,
+body.light .bg-white-15 {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+body.light .border-white-5,
+body.light .border-white-10 {
+  border-color: rgba(0, 0, 0, 0.06) !important;
+}
+body.light .border-white-20 {
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Input & Button elements overrides */
+body.light .glass-input {
+  background: rgba(255, 255, 255, 0.8) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: var(--text-main) !important;
+}
+body.light .glass-input::placeholder {
+  color: var(--text-dark) !important;
+}
+body.light .glass-btn-secondary {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: var(--text-main) !important;
+}
+body.light .glass-btn-secondary:hover {
+  background: rgba(0, 0, 0, 0.07) !important;
+}
+
+/* Header title gradient */
+body.light header h1 {
+  background: linear-gradient(90deg, var(--text-main), var(--accent-primary)) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+}
+
+/* Help Panel (avoid inline style overlaying) */
+body.light .absolute[style*="background"] {
+  background: linear-gradient(135deg, rgba(246, 245, 240, 0.98), rgba(238, 236, 230, 0.99)) !important;
+  border-color: rgba(109, 40, 217, 0.25) !important;
+}
+
+/* Blocked Autoplay screen overlay */
+body.light .bg-black-80,
+body.light .bg-black-85 {
+  background-color: rgba(246, 245, 240, 0.85) !important;
+}
+body.light .bg-black-80 h3,
+body.light .bg-black-80 p {
+  color: var(--text-main) !important;
+}
+
+/* System messages in ChatBox */
+body.light .text-purple-300 {
+  color: var(--accent-primary) !important;
+}
+body.light .bg-purple-95-20 {
+  background-color: rgba(109, 40, 217, 0.06) !important;
+}
+body.light .border-purple-50-10 {
+  border-color: rgba(109, 40, 217, 0.12) !important;
+}
+
+/* Error messages in ChatBox */
+body.light .text-rose-400 {
+  color: #b91c1c !important;
+}
+body.light .bg-rose-60-20 {
+  background-color: rgba(220, 38, 38, 0.06) !important;
+}
+body.light .border-rose-50-10 {
+  border-color: rgba(220, 38, 38, 0.12) !important;
+}
+
+/* User avatar text color */
+body.light .w-7.h-7.text-white {
+  color: var(--text-main) !important;
+  text-shadow: none !important;
+}
+
+/* System/playback control times */
+body.light .text-xs.text-muted.font-mono {
+  color: var(--text-muted) !important;
+}

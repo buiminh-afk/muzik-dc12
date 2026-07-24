@@ -7,7 +7,7 @@ import YoutubePlayer from './YoutubePlayer';
 import QueueList, { PlaylistItem } from './QueueList';
 import ChatBox, { ChatMessage } from './ChatBox';
 import UsersList, { RoomUser } from './UsersList';
-import { Music, Share2, LogOut, Disc, Sparkles, Headphones, ArrowRight } from 'lucide-react';
+import { Music, Share2, LogOut, Disc, Sparkles, Headphones, ArrowRight, Sun, Moon } from 'lucide-react';
 
 interface RoomClientProps {
   roomId: string;
@@ -21,6 +21,27 @@ const AVATAR_COLORS = [
 export default function RoomClient({ roomId }: RoomClientProps) {
   const router = useRouter();
   
+  // State quản lý theme (light / dark)
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  // Khôi phục theme từ localStorage
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('yt_together_theme') as 'dark' | 'light';
+    if (savedTheme) {
+      setTheme(savedTheme);
+      document.body.className = savedTheme;
+    } else {
+      document.body.className = 'dark';
+    }
+  }, []);
+
+  const handleToggleTheme = () => {
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+    localStorage.setItem('yt_together_theme', newTheme);
+    document.body.className = newTheme;
+  };
+
   // State quản lý kết nối & user
   const [username, setUsername] = useState('');
   const [hasLoadedName, setHasLoadedName] = useState(false);
@@ -860,6 +881,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         </div>
 
         <div className="flex items-center w-full sm-w-auto justify-end" style={{ gap: '12px' }}>
+          <button
+            onClick={handleToggleTheme}
+            className="glass-btn glass-btn-secondary text-xs flex items-center justify-center"
+            style={{ cursor: 'pointer', width: '32px', height: '32px', padding: 0 }}
+            title={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
+            aria-label="Đổi giao diện"
+          >
+            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
+
           <button
             onClick={handleCopyLink}
             className="glass-btn glass-btn-secondary px-4 text-xs flex items-center flex-1 sm-flex-none"
