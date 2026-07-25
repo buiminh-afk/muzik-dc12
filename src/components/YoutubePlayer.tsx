@@ -48,21 +48,34 @@ export default function YoutubePlayer({
     const audio = audioRef.current;
     if (!audio || !videoId) return;
 
-    if (isPlaying) {
-      // For live streams, setting src forces browser to clear cache & play the live edge
-      if (audio.src !== streamUrl) {
-        audio.src = streamUrl;
-      }
+    let retryTimeout: NodeJS.Timeout;
+
+    const attemptPlay = () => {
+      // Always reset src to force browser to ignore cached 404s
+      audio.src = streamUrl;
       audio.load();
       audio.play().then(() => {
         setIsAutoplayBlocked(false);
       }).catch((err) => {
-        console.warn('[AudioPlayer] Playback blocked by browser:', err.message);
-        setIsAutoplayBlocked(true);
+        console.warn('[AudioPlayer] Playback blocked or failed:', err.message);
+        if (err.name === 'NotAllowedError') {
+          setIsAutoplayBlocked(true);
+        } else {
+          // Stream likely not ready yet (404), retry in 2 seconds
+          retryTimeout = setTimeout(attemptPlay, 2000);
+        }
       });
+    };
+
+    if (isPlaying) {
+      attemptPlay();
     } else {
       audio.pause();
     }
+
+    return () => {
+      clearTimeout(retryTimeout);
+    };
   }, [isPlaying, videoId, streamUrl]);
 
   // Handle Volume changes
@@ -108,7 +121,7 @@ export default function YoutubePlayer({
 
   return (
     <div className="flex flex-col gap-3 h-full">
-      <audio ref={audioRef} style={{ display: 'none' }} crossOrigin="anonymous" />
+      <audio ref={audioRef} style={{ display: 'none' }} />
 
       <div className="flex justify-between items-center mb-2">
         <span className="text-xs text-muted flex items-center gap-1.5 font-semibold uppercase tracking-wider">
@@ -144,7 +157,10 @@ export default function YoutubePlayer({
             className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-30 transition-all cursor-pointer animate-fade-in"
             onClick={() => {
               setIsAutoplayBlocked(false);
-              audioRef.current?.play().catch(e => console.error(e));
+              if (audioRef.current) {
+                audioRef.current.load();
+                audioRef.current.play().catch(e => console.error(e));
+              }
             }}
             title="Nhấn để tham gia phát nhạc"
           >

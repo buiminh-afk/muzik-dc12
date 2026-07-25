@@ -165,9 +165,8 @@ class RoomWorker {
 
     try {
       const ytDlp = spawn('yt-dlp', [
-        '--cookies', '/home/2h1m/muzik-dc12/muzik-dc12/cookies.txt',
-        '--js-runtimes', 'node',
-        '--remote-components', 'ejs:github',
+        '--force-ipv4',
+        '--extractor-args', 'youtube:player_client=android,ios,tv,web_embedded',
         '-f', 'bestaudio',
         '-o', '-',
         `https://www.youtube.com/watch?v=${song.videoId}`
