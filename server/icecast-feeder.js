@@ -165,12 +165,13 @@ class RoomWorker {
 
     try {
       const ytDlp = spawn('yt-dlp', [
-        '--force-ipv4',
-        '--extractor-args', 'youtube:player_client=android,ios,tv,web_embedded',
-        '-f', 'bestaudio',
-        '-o', '-',
-        `https://www.youtube.com/watch?v=${song.videoId}`
-      ]);
+      '--cookies', '/home/2h1m/muzik-dc12/muzik-dc12/cookies.txt',
+      '--js-runtimes', 'node',
+      '--remote-components', 'ejs:github',
+      '-f', 'bestaudio',
+      '-o', '-',
+      `https://www.youtube.com/watch?v=${song.videoId}`
+    ]);
 
       const ffmpeg = spawn('ffmpeg', [
         '-i', 'pipe:0',
