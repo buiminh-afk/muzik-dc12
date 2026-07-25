@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Send, Terminal, HelpCircle } from 'lucide-react';
+import { Send, Terminal, HelpCircle, Smile } from 'lucide-react';
 
 export interface ChatMessage {
   id: string;
@@ -16,17 +16,31 @@ interface ChatBoxProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
   onCommand: (command: string, args: string) => void;
+  onSendReaction?: (reaction: string) => void;
 }
 
-export default function ChatBox({ messages, onSendMessage, onCommand }: ChatBoxProps) {
+export default function ChatBox({ messages, onSendMessage, onCommand, onSendReaction }: ChatBoxProps) {
   const [inputText, setInputText] = useState('');
   const [showHelp, setShowHelp] = useState(false);
+  const [showReactions, setShowReactions] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const reactionRef = useRef<HTMLDivElement>(null);
 
   // Tự động cuộn xuống khi có tin nhắn mới
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Click ra ngoài để đóng reactions
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (reactionRef.current && !reactionRef.current.contains(e.target as Node)) {
+        setShowReactions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -203,17 +217,59 @@ export default function ChatBox({ messages, onSendMessage, onCommand }: ChatBoxP
       </div>
 
       {/* Ô Nhập liệu (Input Form) */}
-      <form onSubmit={handleSubmit} className="flex gap-2">
+      <form onSubmit={handleSubmit} className="flex gap-2 items-center">
         <input
           type="text"
           placeholder="Gõ tin nhắn hoặc lệnh (ví dụ: /play <link>)..."
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           className="glass-input flex-1 py-2 px-3 text-xs"
+          style={{ height: '36px' }}
           maxLength={200}
         />
-        <button type="submit" className="glass-btn p-2 rounded-lg flex-shrink-0" style={{ cursor: 'pointer' }} title="Gửi (Enter)">
-          <Send size={14} />
+        
+        {/* Emoji Button */}
+        <div className="relative flex" ref={reactionRef}>
+          <button 
+            type="button" 
+            onClick={() => setShowReactions(!showReactions)}
+            className="glass-btn rounded-lg flex-shrink-0 flex items-center justify-center" 
+            style={{ cursor: 'pointer', width: '36px', height: '36px', padding: 0 }} 
+            title="Biểu cảm"
+          >
+            <Smile size={15} />
+          </button>
+          
+          {showReactions && (
+            <div 
+              className="absolute p-2 glass-card rounded-xl shadow-xl flex items-center gap-1 z-50 animate-fade-in" 
+              style={{ 
+                bottom: '100%', 
+                right: '0', 
+                marginBottom: '8px',
+                backgroundColor: 'var(--bg-primary)', 
+                border: '1px solid var(--glass-border)' 
+              }}
+            >
+              {['❤️', '🔥', '👍', '🎉', '😆'].map((emoji) => (
+                <button 
+                  key={emoji}
+                  type="button"
+                  onClick={() => {
+                    onSendReaction?.(emoji);
+                    setShowReactions(false);
+                  }} 
+                  className="text-lg hover:scale-125 transition-transform bg-white-5 p-1.5 rounded-full cursor-pointer border border-white-5"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button type="submit" className="glass-btn rounded-lg flex-shrink-0 flex items-center justify-center" style={{ cursor: 'pointer', width: '36px', height: '36px', padding: 0 }} title="Gửi (Enter)">
+          <Send size={15} />
         </button>
       </form>
     </div>
