@@ -56,7 +56,7 @@ class RoomWorker {
   }
 
   init() {
-    this.channel = this.supabase.channel(this.roomId, {
+    this.channel = this.supabase.channel(`room_${this.roomId}`, {
       config: {
         presence: {
           key: 'server-feeder',
@@ -293,7 +293,7 @@ class RoomWorker {
 }
 
 const activeWorkers = new Map();
-const lobbyChannel = supabase.channel('lobby');
+const lobbyChannel = supabase.channel('room_lobby');
 
 function handleRoomActive(roomId) {
   if (!roomId) return;
