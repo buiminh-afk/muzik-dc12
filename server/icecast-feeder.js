@@ -191,6 +191,14 @@ class RoomWorker {
         console.error(`[Room: ${this.roomId}] ffmpeg process error:`, err.message);
       });
 
+      ytDlp.stderr.on('data', (data) => {
+        console.log(`[YT-DLP] ${data.toString()}`);
+      });
+
+      ffmpeg.stderr.on('data', (data) => {
+        console.log(`[FFMPEG] ${data.toString()}`);
+      });
+
       ffmpeg.on('close', (code) => {
         console.log(`[Room: ${this.roomId}] ffmpeg stream pipeline exited with code: ${code}`);
         this.handleTrackEnd();
