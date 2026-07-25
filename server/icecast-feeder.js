@@ -161,15 +161,16 @@ class RoomWorker {
     if (this.isTransitioning) return;
     this.isTransitioning = true;
 
-    const videoUrl = `https://www.youtube.com/watch?v=${song.videoId}`;
     console.log(`[Room: ${this.roomId}] Initializing yt-dlp + ffmpeg pipeline for ${song.title}`);
 
     try {
       const ytDlp = spawn('yt-dlp', [
         '--cookies', '/home/2h1m/muzik-dc12/muzik-dc12/cookies.txt',
+        '--js-runtimes', 'node',
+        '--remote-components', 'ejs:github',
         '-f', 'bestaudio',
         '-o', '-',
-        videoUrl
+        `https://www.youtube.com/watch?v=${song.videoId}`
       ]);
 
       const ffmpeg = spawn('ffmpeg', [
