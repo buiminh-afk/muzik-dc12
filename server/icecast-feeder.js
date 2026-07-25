@@ -296,6 +296,7 @@ const activeWorkers = new Map();
 const lobbyChannel = supabase.channel('room_lobby');
 
 function handleRoomActive(roomId) {
+  console.log(`[Manager] Received ping for Room: ${roomId}`);
   if (!roomId) return;
   if (!activeWorkers.has(roomId)) {
     console.log(`[Manager] Spawning new room worker for Room: ${roomId}`);
@@ -307,8 +308,11 @@ function handleRoomActive(roomId) {
   }
 }
 
-lobbyChannel.on('broadcast', { event: 'room_active' }, ({ payload }) => {
-  handleRoomActive(payload.roomId);
+lobbyChannel.on('broadcast', { event: 'room_active' }, (payload) => {
+  console.log('[Manager] Raw broadcast payload:', payload);
+  if (payload && payload.payload) {
+    handleRoomActive(payload.payload.roomId);
+  }
 });
 
 lobbyChannel.subscribe((status) => {
