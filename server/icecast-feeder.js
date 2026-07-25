@@ -166,6 +166,7 @@ class RoomWorker {
 
     try {
       const ytDlp = spawn('yt-dlp', [
+        '--cookies', '/home/2h1m/muzik-dc12/muzik-dc12/cookies.txt',
         '-f', 'bestaudio',
         '-o', '-',
         videoUrl
