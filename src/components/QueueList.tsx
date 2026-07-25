@@ -1,18 +1,20 @@
 'use client';
 
+import { useState } from 'react';
 import {
   ListMusic,
   Disc,
-  Play,
   ArrowUpToLine,
   X,
+  Volume2,
+  Music,
 } from 'lucide-react';
 
 export interface PlaylistItem {
   id: string;
   videoId: string;
   title: string;
-  thumbnail: string;
+  thumbnail?: string;
   addedBy: string;
   duration?: string;
 }
@@ -24,6 +26,38 @@ interface QueueListProps {
   onMoveToTop: (index: number) => void;
 }
 
+// Component Thumbnail riêng biệt có xử lý Fallback đa tầng
+function QueueThumbnail({ videoId, title }: { videoId: string; title: string; rawThumbnail?: string }) {
+  const [imgSrc, setImgSrc] = useState<string>(`https://i.ytimg.com/vi/${videoId}/0.jpg`);
+  const [hasError, setHasError] = useState(false);
+
+  const handleError = () => {
+    if (imgSrc.includes('i.ytimg.com')) {
+      setImgSrc(`https://img.youtube.com/vi/${videoId}/0.jpg`);
+    } else {
+      setHasError(true);
+    }
+  };
+
+  return (
+    <div className="relative w-20 aspect-video shrink-0 overflow-hidden rounded-md bg-black border border-white/5 flex items-center justify-center shadow-sm">
+      {!hasError ? (
+        <img
+          src={imgSrc}
+          alt={title}
+          className="h-full w-full object-cover scale-[1.35]"
+          onError={handleError}
+          loading="lazy"
+        />
+      ) : (
+        <div className="flex items-center justify-center w-full h-full bg-gradient-to-br from-purple-900/40 to-neutral-900 text-purple-400">
+          <Music size={20} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function QueueList({
   queue,
   onRemoveItem,
@@ -31,151 +65,156 @@ export default function QueueList({
   onMoveToTop,
 }: QueueListProps) {
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 mb-3">
-        <ListMusic size={18} className="text-purple-400" />
-        <span className="text-sm font-semibold uppercase tracking-wider text-muted flex-1">
-          Hàng Đợi ({queue.length})
-        </span>
-      </div>
+    <>
+      <style>{`
+        @keyframes equalize {
+          0%, 100% { transform: scaleY(0.4); }
+          50% { transform: scaleY(1); }
+        }
+        .music-bar {
+          width: 3px;
+          background-color: #a855f7;
+          border-radius: 2px;
+          animation: equalize 1s ease-in-out infinite;
+          transform-origin: bottom;
+        }
+        .queue-item {
+          background-color: rgba(255, 255, 255, 0.03);
+          border-color: transparent;
+          color: var(--text-muted);
+          cursor: pointer;
+        }
+        .queue-item:hover {
+          background-color: rgba(255, 255, 255, 0.07);
+          border-color: rgba(255, 255, 255, 0.05);
+        }
+        .queue-item-playing {
+          background-color: rgba(139, 92, 246, 0.1);
+          border-color: rgba(139, 92, 246, 0.3);
+          color: var(--accent-primary);
+        }
+        body.light .queue-item {
+          background-color: rgba(0, 0, 0, 0.02);
+          color: var(--text-main);
+        }
+        body.light .queue-item:hover {
+          background-color: rgba(0, 0, 0, 0.05);
+          border-color: rgba(0, 0, 0, 0.05);
+        }
+        body.light .queue-item-playing {
+          background-color: rgba(109, 40, 217, 0.08);
+          border-color: rgba(109, 40, 217, 0.2);
+        }
+      `}</style>
+      <div className="flex flex-col h-full w-full select-none">
+        {/* Header */}
+        <div className="flex items-center gap-2 mb-4 shrink-0 px-2">
+          <ListMusic size={20} className="text-purple-400" />
+          <span className="text-xs font-bold uppercase tracking-wider text-neutral-400 flex-1">
+            Hàng Đợi ({queue.length})
+          </span>
+        </div>
 
-      <div 
-        className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2"
-      >
-        {queue.length === 0 ? (
-          <div 
-            className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-white-02 border border-white-5 rounded-xl min-h-120"
-            style={{ borderStyle: 'dashed' }}
-          >
-            <Disc size={28} className="text-white/10 mb-2 animate-spin-slow" style={{ opacity: 0.15 }} />
-            <p className="text-xs text-muted">Chưa có bài hát nào trong hàng đợi.</p>
-          </div>
-        ) : (
-          queue.map((item, index) => {
-            const isPlayingNow = index === 0;
+        {/* Queue List */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col gap-4 custom-scrollbar" style={{ paddingRight: '8px' }}>
+          {queue.length === 0 ? (
+            <div
+              className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-white/[0.02] border border-white/5 rounded-2xl min-h-[160px]"
+              style={{ borderStyle: 'dashed' }}
+            >
+              <Disc size={32} className="text-neutral-600 mb-3 animate-spin-slow" />
+              <p className="text-sm text-neutral-500">Chưa có bài hát nào trong hàng đợi</p>
+            </div>
+          ) : (
+            queue.map((item, index) => {
+              const isPlayingNow = index === 0;
 
-            return (
-              <div
-                key={item.id}
-                onClick={() => !isPlayingNow && onPlayIndex(index)}
-                className={`group relative flex items-center gap-3.5 p-3.5 rounded-xl border transition-all duration-150 ${
-                  isPlayingNow
-                    ? 'bg-purple-500/10 border-purple-400/20 shadow-md'
-                    : 'bg-white/[0.02] border-white/[0.05] hover:bg-white/[0.045] hover:border-white/10'
-                }`}
-                style={{ cursor: isPlayingNow ? 'default' : 'pointer' }}
-                title={isPlayingNow ? 'Đang phát' : 'Nhấp để phát bài hát này ngay'}
-              >
-                {/* Number or Play indicator */}
-                <div className="w-5 text-center text-xs font-semibold text-muted animate-fade-in">
-                  {isPlayingNow ? (
-                    <span className="flex items-center justify-center">
-                      <span className="flex h-2 w-2 relative">
-                        <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-purple-400" style={{ opacity: 0.75 }}></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500"></span>
-                      </span>
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => !isPlayingNow && onPlayIndex(index)}
+                  className={`group relative flex items-center gap-4 px-4 py-3 w-full rounded-xl transition-all duration-200 border ${
+                    isPlayingNow
+                      ? 'queue-item-playing shadow-sm'
+                      : 'queue-item text-neutral-300'
+                  }`}
+                >
+                  {/* 1. STT / Icon Đang phát */}
+                  <div className="w-7 shrink-0 flex items-center justify-center">
+                    <span className={`text-[13px] transition-colors ${
+                      isPlayingNow ? 'text-purple-400 font-bold' : 'text-neutral-500 font-semibold group-hover:text-neutral-300'
+                    }`}>
+                      {index + 1}
                     </span>
-                  ) : (
-                    <span>{index + 1}</span>
-                  )}
-                </div>
-
-                {/* Thumbnail */}
-                <div className="relative w-16 aspect-video rounded overflow-hidden bg-black flex-shrink-0 shadow-md">
-                  <img
-                    src={item.thumbnail || `https://img.youtube.com/vi/${item.videoId}/default.jpg`}
-                    alt={item.title}
-                    className="w-full h-full"
-                    style={{ objectFit: 'cover' }}
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=100&auto=format&fit=crop&q=60';
-                    }}
-                  />
-                </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <h4
-                    className={`text-xs font-medium truncate ${
-                      isPlayingNow ? 'text-purple-200 font-semibold' : 'text-white'
-                    }`}
-                    title={item.title}
-                  >
-                    {item.title}
-                  </h4>
-                  <p className="text-[10px] text-muted truncate mt-0.5">
-                    Thêm bởi: <span className="text-neutral-300">{item.addedBy}</span>
-                  </p>
-                </div>
-
-                {/* Item actions - Luôn hiển thị ở độ mờ 70% và sáng lên 100% khi hover */}
-                {!isPlayingNow && (
-                  <div
-                    className="
-                      flex items-center gap-1.5
-                      opacity-70 group-hover:opacity-100
-                      transition-opacity
-                      shrink-0
-                    "
-                  >
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMoveToTop(index);
-                      }}
-                      className="
-                        w-8 h-8
-                        flex items-center justify-center
-                        rounded-lg
-                        border border-white-10
-                        bg-white-5
-                        text-neutral-300
-                        transition-all
-                        hover:bg-purple-500/20
-                        hover:border-purple-400/30
-                        hover:text-purple-300
-                        active:scale-95
-                        cursor-pointer
-                      "
-                      title="Đưa lên phát tiếp"
-                      aria-label={`Đưa ${item.title} lên đầu hàng đợi`}
-                    >
-                      <ArrowUpToLine size={13} strokeWidth={2} />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveItem(item.id);
-                      }}
-                      className="
-                        w-8 h-8
-                        flex items-center justify-center
-                        rounded-lg
-                        border border-transparent
-                        bg-transparent
-                        text-neutral-400
-                        transition-all
-                        hover:bg-rose-500/15
-                        hover:border-rose-400/20
-                        hover:text-rose-300
-                        active:scale-95
-                        cursor-pointer
-                      "
-                      title="Xóa khỏi hàng đợi"
-                      aria-label={`Xóa ${item.title} khỏi hàng đợi`}
-                    >
-                      <X size={14} strokeWidth={2} />
-                    </button>
                   </div>
-                )}
-              </div>
-            );
-          })
-        )}
+
+                  {/* 2. Thumbnail chuẩn nét & không vỡ */}
+                  <QueueThumbnail
+                    videoId={item.videoId}
+                    title={item.title}
+                    rawThumbnail={item.thumbnail}
+                  />
+
+                  {/* 3. Info (Cắt tên cực gọn) */}
+                  <div className="flex-1 min-w-0 overflow-hidden flex flex-col justify-center">
+                    <h4
+                      className={`text-xs leading-snug truncate block w-full ${
+                        isPlayingNow
+                          ? 'font-bold text-purple-300'
+                          : 'font-semibold text-neutral-200 group-hover:text-white'
+                      }`}
+                      style={{ maxWidth: '400px' }}
+                      title={item.title}
+                    >
+                      {item.title}
+                    </h4>
+
+                    <p className="text-xs text-neutral-500 truncate block w-full mt-1">
+                      Thêm bởi <span className="text-neutral-400 font-medium">{item.addedBy}</span>
+                    </p>
+                  </div>
+
+                  {/* 4. Actions tinh tế theo style Dark Minimal */}
+                  <div className="shrink-0 flex items-center pl-2" style={{ paddingRight: '4px' }}>
+                    {isPlayingNow ? (
+                      <div className="flex items-end justify-center gap-[4px] w-8 h-5 mr-1">
+                        <div className="music-bar h-full" style={{ width: '4px', animationDelay: '0s' }} />
+                        <div className="music-bar h-full" style={{ width: '4px', animationDelay: '0.3s' }} />
+                        <div className="music-bar h-full" style={{ width: '4px', animationDelay: '0.6s' }} />
+                        <div className="music-bar h-full" style={{ width: '4px', animationDelay: '0.2s' }} />
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMoveToTop(index);
+                          }}
+                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:text-purple-300 hover:bg-purple-500/20 active:scale-90 transition-all"
+                          title="Đưa lên phát tiếp"
+                        >
+                          <ArrowUpToLine size={16} />
+                        </div>
+
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemoveItem(item.id);
+                          }}
+                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-rose-500/20 active:scale-90 transition-all"
+                          title="Xóa khỏi hàng đợi"
+                        >
+                          <X size={16} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

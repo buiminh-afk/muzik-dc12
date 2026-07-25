@@ -939,7 +939,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       {/* WORKSPACE */}
       <div className="flex-1 min-h-0 grid grid-cols-1 lg-grid lg-grid-cols-12 gap-4 overflow-y-auto lg-overflow-hidden">
         
-        {/* LEFT COLUMN (Player & Chat) */}
+        {/* LEFT COLUMN (Player & Playlist) */}
         <main className="lg-col-span-7 min-h-0 flex flex-col gap-4 overflow-hidden">
           {/* Video Player */}
           <div className="glass-card p-4 shrink-0 overflow-hidden">
@@ -961,23 +961,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             </div>
           </div>
 
-          {/* Chat & Commands */}
-          <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
-            <ChatBox
-              messages={messages}
-              onSendMessage={handleSendMessage}
-              onCommand={handleCommand}
-            />
-          </div>
-        </main>
-
-        {/* RIGHT COLUMN (Users & Playlist) */}
-        <aside className="lg-col-span-5 min-h-0 flex flex-col gap-4 overflow-hidden">
-          {/* Active Users */}
-          <div className="glass-card p-4 h-[140px] shrink-0 overflow-hidden">
-            <UsersList users={users} localRefId={localRefId} />
-          </div>
-
           {/* Playlist / QueueList */}
           <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
             <QueueList
@@ -985,6 +968,23 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               onRemoveItem={handleRemoveItem}
               onPlayIndex={handlePlayIndex}
               onMoveToTop={handleMoveToTop}
+            />
+          </div>
+        </main>
+
+        {/* RIGHT COLUMN (Users & Chat) */}
+        <aside className="lg-col-span-5 min-h-0 flex flex-col gap-4 overflow-hidden">
+          {/* Active Users */}
+          <div className="glass-card p-4 h-[140px] shrink-0 overflow-hidden">
+            <UsersList users={users} localRefId={localRefId} />
+          </div>
+
+          {/* Chat & Commands */}
+          <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
+            <ChatBox
+              messages={messages}
+              onSendMessage={handleSendMessage}
+              onCommand={handleCommand}
             />
           </div>
         </aside>
