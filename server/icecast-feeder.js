@@ -36,6 +36,8 @@ if (!supabaseUrl || !supabaseKey) {
   process.exit(1);
 }
 
+const supabase = createClient(supabaseUrl, supabaseKey);
+
 class RoomWorker {
   constructor(roomId, url, key, onClose) {
     this.roomId = roomId;
