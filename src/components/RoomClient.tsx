@@ -8,7 +8,8 @@ import QueueList, { PlaylistItem } from './QueueList';
 import ChatBox, { ChatMessage } from './ChatBox';
 import UsersList, { RoomUser } from './UsersList';
 import SearchUI from './SearchUI';
-import { Music, Share2, LogOut, Disc, Sparkles, Headphones, ArrowRight, Sun, Moon, MonitorPlay, Heart, ThumbsUp, Flame, PartyPopper } from 'lucide-react';
+import { Music, Share2, LogOut, Disc, Sparkles, Headphones, ArrowRight, Sun, Moon, MonitorPlay, Heart, ThumbsUp, Flame, PartyPopper, RefreshCw, HelpCircle } from 'lucide-react';
+import 'intro.js/introjs.css';
 
 interface RoomClientProps {
   roomId: string;
@@ -58,6 +59,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   isPlayingRef.current = isPlaying;
   const [seekTime, setSeekTime] = useState<number | null>(null);
   const [playlistIdToLoad, setPlaylistIdToLoad] = useState<string | null>(null);
+  const [roomName, setRoomName] = useState(`Phòng ${roomId}`);
   
   // State quản lý chat
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -79,6 +81,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   usersRef.current = users;
   const localRefIdRef = useRef<string | null>(null);
   localRefIdRef.current = localRefId;
+  const playNextSongRef = useRef<() => void>(() => {});
 
   // ===== PERSISTENCE: Lưu/phục hồi hàng đợi từ localStorage =====
   const storageKey = `yt_together_room_${roomId}`;
@@ -110,7 +113,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     } catch (e) {}
   }, [queue, isPlaying, storageKey]);
 
-  // Lấy username từ localStorage
+  // Lấy username từ localStorage & Tên phòng
   useEffect(() => {
     const storedName = localStorage.getItem('yt_together_username');
     if (storedName) {
@@ -122,7 +125,20 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     // Gán màu ngẫu nhiên cho user
     const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
     setColor(randomColor);
-  }, []);
+
+    // Lấy cấu hình phòng từ sessionStorage
+    try {
+      const stored = sessionStorage.getItem(`yt_room_config_${roomId}`);
+      if (stored) {
+        const config = JSON.parse(stored);
+        if (config && config.roomName) {
+          setRoomName(config.roomName);
+        }
+      }
+    } catch (e) {
+      console.warn('[RoomClient] Error loading roomName:', e);
+    }
+  }, [roomId]);
 
   // Thiết lập Supabase Realtime Connection
   useEffect(() => {
@@ -218,22 +234,22 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               queue: queueRef.current,
               isPlaying: isPlayingRef.current,
               currentTime: playerTimeRef.current,
-              targetTabId: payload.senderTabId
+              targetRef: payload.requesterRef
             }
           });
         }
       })
       .on('broadcast', { event: 'sync_state' }, ({ payload }: any) => {
-        const myTabId = channel.getTabId ? channel.getTabId() : 'new_tab';
-        // Chỉ đồng bộ nếu chính tab này là người gửi yêu cầu sync ban đầu
-        if (payload.targetTabId === myTabId && payload.queue && payload.queue.length > 0) {
+        const myRefId = localRefIdRef.current;
+        const isMyTarget = !payload.targetRef || payload.targetRef === 'new_tab' || payload.targetRef === myRefId;
+        if (isMyTarget && payload.queue) {
           setQueue(payload.queue);
           setIsPlaying(payload.isPlaying);
           if (payload.currentTime > 0) {
             setSeekTime(payload.currentTime);
             setTimeout(() => setSeekTime(null), 100);
           }
-          addSystemMessage(`Chào mừng ${username} vào phòng! Đã đồng bộ dữ liệu với mọi người.`);
+          addSystemMessage(`🔄 Đã đồng bộ thành công với phòng.`);
         }
       });
 
@@ -250,11 +266,35 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             username: userPresence.username || 'Khách',
             color: userPresence.color || '#00F0FF',
             joinedAt: userPresence.joinedAt,
-            isHost: userPresence.isHost
+            isHost: userPresence.isHost,
+            videoFinished: userPresence.videoFinished || false
           });
         }
       });
       
+      // Sắp xếp theo thời gian tham gia để xác định thứ tự
+      onlineUsers.sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
+
+      // Dynamic Host Logic
+      const hasHost = onlineUsers.some(u => u.isHost);
+      const myRefId = localRefIdRef.current;
+      
+      if (!hasHost && onlineUsers.length > 0) {
+        const oldestUser = onlineUsers[0];
+        oldestUser.isHost = true;
+        
+        if (oldestUser.presence_ref === myRefId) {
+          channel.track({
+            username,
+            color,
+            joinedAt: oldestUser.joinedAt,
+            isHost: true,
+            videoFinished: oldestUser.videoFinished || false
+          }).catch((err: any) => console.warn('Lobby track error:', err));
+          addSystemMessage('👑 Chủ phòng cũ đã rời đi. Bạn đã trở thành Chủ phòng mới!');
+        }
+      }
+
       setUsers(onlineUsers);
       
       const myRef = Object.keys(state).find(key => {
@@ -263,6 +303,15 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       });
       if (myRef) {
         setLocalRefId(myRef);
+      }
+
+      // Check if everyone is finished (Only Host coordinates this)
+      const isCurrentHost = onlineUsers.find(u => u.presence_ref === myRefId)?.isHost;
+      if (isCurrentHost && onlineUsers.length > 0) {
+        const allFinished = onlineUsers.every(u => u.videoFinished);
+        if (allFinished) {
+          playNextSongRef.current();
+        }
       }
     });
 
@@ -281,14 +330,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             username,
             color,
             joinedAt: new Date().toISOString(),
-            isHost: isFirst
+            isHost: isFirst,
+            videoFinished: false
           });
 
           setTimeout(() => {
+            const myRefId = localRefIdRef.current;
             channel.send({
               type: 'broadcast',
               event: 'request_sync',
-              payload: { senderTabId: channel.getTabId ? channel.getTabId() : 'new_tab' }
+              payload: { requesterRef: myRefId || 'new_tab' }
             });
           }, 1000);
           break;
@@ -318,6 +369,52 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       channel.unsubscribe();
     };
   }, [username, color, roomId]);
+
+  // Cập nhật số lượng người trong phòng lên Lobby Presence
+  useEffect(() => {
+    if (!lobbyChannelRef.current || !username) return;
+    
+    let hasPassword = false;
+    let passwordHash = null;
+    try {
+      const stored = sessionStorage.getItem(`yt_room_config_${roomId}`);
+      if (stored) {
+        const config = JSON.parse(stored);
+        hasPassword = config.hasPassword || false;
+        passwordHash = config.passwordHash || null;
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    lobbyChannelRef.current.track({
+      type: 'room',
+      roomId,
+      roomName: roomName,
+      hostName: username,
+      hasPassword: hasPassword,
+      passwordHash: passwordHash,
+      userCount: Math.max(1, users.length)
+    }).catch((err: any) => console.warn('Lobby track error:', err));
+  }, [users.length, username, roomId, roomName]);
+
+  // Reset videoFinished status when the current video changes
+  const currentVideo = queue.length > 0 ? queue[0] : null;
+  const currentVideoId = currentVideo ? currentVideo.videoId : null;
+  useEffect(() => {
+    if (!channelRef.current || !username) return;
+    const myRefId = localRefIdRef.current;
+    if (!myRefId) return;
+    
+    const me = usersRef.current.find(u => u.presence_ref === myRefId);
+    channelRef.current.track({
+      username,
+      color,
+      joinedAt: me ? me.joinedAt : new Date().toISOString(),
+      isHost: me ? me.isHost : false,
+      videoFinished: false
+    }).catch((err: any) => console.warn('Track reset error:', err));
+  }, [currentVideoId, username]);
 
   // Gửi tin nhắn chat thông thường
   const handleSendMessage = (text: string) => {
@@ -687,6 +784,65 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }, 2500);
   };
 
+  const handleManualSync = () => {
+    if (!channelRef.current) return;
+    
+    const myRefId = localRefId;
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'request_sync',
+      payload: { requesterRef: myRefId || 'new_tab' }
+    });
+    
+    addSystemMessage('🔄 Đang gửi yêu cầu đồng bộ lại với chủ phòng...');
+    showToast('🔄 Đang đồng bộ lại nhạc...');
+  };
+
+  const handleStartTour = () => {
+    import('intro.js').then(({ default: intro }) => {
+      intro()
+        .setOptions({
+          steps: [
+            {
+              element: '.room-header-branding',
+              intro: 'Chào mừng bạn đến với phòng nhạc YouTube Together! Đây là tên phòng và ID phòng.',
+              position: 'bottom'
+            },
+            {
+              element: '.room-header-search',
+              intro: 'Bạn có thể tìm kiếm video YouTube hoặc dán liên kết video/playlist trực tiếp ở đây để thêm vào hàng đợi.',
+              position: 'bottom'
+            },
+            {
+              element: '.room-nav-buttons',
+              intro: 'Các nút chức năng: Đổi giao diện Sáng/Tối, Đồng bộ lại nhạc, Chế độ rạp hát, Mời bạn bè và Rời phòng.',
+              position: 'bottom'
+            },
+            {
+              element: '.room-left-column',
+              intro: 'Cột bên trái hiển thị Danh sách thành viên trực tuyến đang có mặt trong phòng.',
+              position: 'right'
+            },
+            {
+              element: '.room-middle-column',
+              intro: 'Khu vực trung tâm chứa Đài phát nhạc (YouTube Video Player) và Hàng đợi bài hát (Queue).',
+              position: 'bottom'
+            },
+            {
+              element: '.room-right-column',
+              intro: 'Cột bên phải là Khung chat và các Lệnh để bạn tương tác, bày tỏ cảm xúc với mọi người.',
+              position: 'left'
+            }
+          ],
+          nextLabel: 'Tiếp tục &rarr;',
+          prevLabel: '&larr; Quay lại',
+          doneLabel: 'Hoàn tất',
+          dontShowAgain: true
+        })
+        .start();
+    }).catch(err => console.error('Failed to load intro.js:', err));
+  };
+
   const extractYoutubeId = (url: string) => {
     const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
     const match = url.match(regExp);
@@ -712,6 +868,25 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const handleVideoEnded = () => {
     if (!channelRef.current) return;
     
+    // Đánh dấu bản thân đã xem xong bài
+    const myRefId = localRefIdRef.current;
+    const me = usersRef.current.find(u => u.presence_ref === myRefId);
+    
+    channelRef.current.track({
+      username,
+      color,
+      joinedAt: me ? me.joinedAt : new Date().toISOString(),
+      isHost: me ? me.isHost : false,
+      videoFinished: true
+    }).catch((err: any) => console.warn('Track videoFinished error:', err));
+    
+    addSystemMessage('⌛ Bạn đã nghe xong. Đang đợi các thành viên khác...');
+    showToast('⌛ Đang đợi các thành viên khác...');
+  };
+
+  const playNextSong = () => {
+    if (!channelRef.current) return;
+    
     if (queueRef.current.length > 1) {
       const newQueue = queueRef.current.slice(1);
       channelRef.current.send({
@@ -722,7 +897,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       channelRef.current.send({
         type: 'broadcast',
         event: 'playback_state',
-        payload: { isPlaying: true, seekTime: 0 }
+        payload: { isPlaying: true, seekTime: 0, sentAt: Date.now() }
       });
       
       // Cập nhật local state
@@ -741,7 +916,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       channelRef.current.send({
         type: 'broadcast',
         event: 'playback_state',
-        payload: { isPlaying: false, seekTime: 0 }
+        payload: { isPlaying: false, seekTime: 0, sentAt: Date.now() }
       });
       
       // Cập nhật local state
@@ -753,6 +928,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       broadcastSystemMessage('🎵 Danh sách phát đã hết. Trình phát tạm dừng.');
     }
   };
+  playNextSongRef.current = playNextSong;
 
   const handleLocalSeek = (time: number) => {
     if (!channelRef.current) return;
@@ -773,17 +949,20 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handleRemoveItem = (id: string) => {
     if (!channelRef.current) return;
+    
+    const itemIndex = queueRef.current.findIndex(item => item.id === id);
+    if (itemIndex === -1) return;
+
+    const removedItem = queueRef.current[itemIndex];
     const isCurrentHost = usersRef.current.find(u => u.presence_ref === localRefIdRef.current)?.isHost;
-    if (!isCurrentHost) {
-      addSystemMessage('❌ Chỉ Chủ phòng mới có quyền xóa bài hát.', true);
+    const isOwner = removedItem.addedBy === username;
+
+    if (!isCurrentHost && !isOwner) {
+      addSystemMessage('❌ Chỉ Chủ phòng hoặc người thêm bài mới có quyền xóa bài hát.', true);
       return;
     }
 
-    const itemIndex = queue.findIndex(item => item.id === id);
-    if (itemIndex === -1) return;
-
-    const removedItem = queue[itemIndex];
-    let newQueue = queue.filter(item => item.id !== id);
+    let newQueue = queueRef.current.filter(item => item.id !== id);
 
     channelRef.current.send({
       type: 'broadcast',
@@ -935,7 +1114,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     router.push('/');
   };
 
-  const currentVideo = queue.length > 0 ? queue[0] : null;
+
 
   if (hasLoadedName && !username) {
     return (
@@ -999,22 +1178,22 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   return (
     <div 
       className="h-dvh max-h-dvh w-full mx-auto p-4 flex flex-col gap-4 overflow-hidden"
-      style={{ maxWidth: '1400px', paddingLeft: '24px', paddingRight: '24px' }}
+      style={{ maxWidth: '100%', paddingLeft: '32px', paddingRight: '32px' }}
     >
       {/* HEADER */}
       <header className="glass-card flex flex-col sm-flex-row items-center justify-between p-4 gap-4 shrink-0 flex-wrap" style={{ overflow: 'visible', zIndex: 50 }}>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 room-header-branding">
           <div className="w-10 h-10 rounded-xl bg-purple-5-20 border border-purple-5-30 flex items-center justify-center text-purple-400 shadow-md">
             <Disc size={20} className="animate-spin-slow text-purple-400" />
           </div>
           <div>
             <h1 className="text-lg font-extrabold tracking-tight bg-gradient-to-r from-white via-neutral-100 to-purple-400 bg-clip-text text-transparent flex items-center gap-2">
-              YouTube Together
+              {roomName}
               <span 
                 className="font-semibold px-2 py-0.5 rounded-full border text-cyan-400 uppercase tracking-widest font-mono"
                 style={{ fontSize: '10px', backgroundColor: 'rgba(6, 182, 212, 0.1)', borderColor: 'rgba(6, 182, 212, 0.2)' }}
               >
-                Room: {roomId}
+                ID: {roomId}
               </span>
             </h1>
             <p className="text-xs text-muted flex items-center gap-1 mt-0.5">
@@ -1025,11 +1204,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         </div>
 
         {/* Search Bar in Header */}
-        <div className="flex-1 w-full sm-w-auto max-w-2xl px-0 sm-px-4 mt-2 sm-mt-0 order-last sm-order-none">
+        <div className="flex-1 w-full sm-w-auto max-w-2xl px-0 sm-px-4 mt-2 sm-mt-0 order-last sm-order-none room-header-search">
           <SearchUI onAddVideo={handleAddVideo} />
         </div>
 
-        <div className="flex items-center w-full sm-w-auto justify-end" style={{ gap: '12px' }}>
+        <div className="flex items-center w-full sm-w-auto justify-end room-nav-buttons" style={{ gap: '12px' }}>
           <button
             onClick={handleToggleTheme}
             className="glass-btn glass-btn-secondary text-xs flex items-center justify-center"
@@ -1038,6 +1217,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             aria-label="Đổi giao diện"
           >
             {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
+
+          <button
+            onClick={handleManualSync}
+            className="glass-btn glass-btn-secondary text-xs flex items-center justify-center"
+            style={{ cursor: 'pointer', width: '32px', height: '32px', padding: 0 }}
+            title="Đồng bộ lại"
+            aria-label="Đồng bộ"
+          >
+            <RefreshCw size={14} />
           </button>
           
           <button
@@ -1048,6 +1237,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             aria-label="Chế độ rạp hát"
           >
             <MonitorPlay size={14} />
+          </button>
+
+          <button
+            onClick={handleStartTour}
+            className="glass-btn glass-btn-secondary text-xs flex items-center justify-center"
+            style={{ cursor: 'pointer', width: '32px', height: '32px', padding: 0 }}
+            title="Hướng dẫn sử dụng"
+            aria-label="Hướng dẫn"
+          >
+            <HelpCircle size={14} />
           </button>
 
           <button
@@ -1072,11 +1271,18 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         </div>
       </header>
 
-      {/* WORKSPACE */}
+      {/* WORKSPACE - 3 COLUMNS */}
       <div className="flex-1 min-h-0 grid grid-cols-1 lg-grid lg-grid-cols-12 gap-4 overflow-y-auto lg-overflow-hidden">
         
-        {/* LEFT COLUMN (Player & Playlist) */}
-        <main className={`${isTheaterMode ? 'lg-col-span-9' : 'lg-col-span-7'} min-h-0 flex flex-col gap-4 overflow-hidden transition-all duration-300`}>
+        {/* LEFT COLUMN: Active Users (lg-col-span-3, order-3 on mobile, lg-order-1 on desktop) */}
+        <aside className={`lg-col-span-3 min-h-0 flex flex-col gap-4 overflow-hidden room-left-column order-3 lg-order-1 ${isTheaterMode ? 'lg-hidden' : ''}`}>
+          <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
+            <UsersList users={users} localRefId={localRefId} />
+          </div>
+        </aside>
+
+        {/* MIDDLE COLUMN: Video Player & QueueList (lg-col-span-6 / lg-col-span-9, order-1 on mobile, lg-order-2 on desktop) */}
+        <main className={`${isTheaterMode ? 'lg-col-span-9' : 'lg-col-span-6'} min-h-0 flex flex-col gap-4 overflow-hidden transition-all duration-300 room-middle-column order-1 lg-order-2`}>
           {/* Video Player */}
           <div className="glass-card p-4 shrink-0 overflow-hidden relative">
             <div 
@@ -1091,6 +1297,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
                 playlistIdToLoad={playlistIdToLoad}
                 isHost={isCurrentHost}
                 reactions={reactions}
+                isWaitingForOthers={users.find(u => u.presence_ref === localRefId)?.videoFinished || false}
+                waitingCount={users.filter(u => !u.videoFinished).length}
                 onPlayerStateChange={handlePlayerStateChange}
                 onVideoEnded={handleVideoEnded}
                 onLocalSeek={handleLocalSeek}
@@ -1104,6 +1312,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
             <QueueList
               queue={queue}
+              isPlaying={isPlaying}
+              username={username}
+              isHost={!!isCurrentHost}
               onRemoveItem={handleRemoveItem}
               onPlayIndex={handlePlayIndex}
               onMoveToTop={handleMoveToTop}
@@ -1111,17 +1322,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           </div>
         </main>
 
-        {/* RIGHT COLUMN (Users & Chat) */}
-        <aside className={`${isTheaterMode ? 'lg-col-span-3' : 'lg-col-span-5'} min-h-0 flex flex-col gap-4 overflow-hidden transition-all duration-300`}>
-          {/* Active Users */}
-          <div className="glass-card p-4 h-[140px] shrink-0 overflow-hidden">
-            <UsersList users={users} localRefId={localRefId} />
-          </div>
-
-          {/* Chat & Commands */}
+        {/* RIGHT COLUMN: Chat Box & Commands (lg-col-span-3, order-2 on mobile, lg-order-3 on desktop) */}
+        <aside className="lg-col-span-3 min-h-0 flex flex-col gap-4 overflow-hidden room-right-column order-2 lg-order-3">
           <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
             <ChatBox
               messages={messages}
+              username={username}
+              users={users}
               onSendMessage={handleSendMessage}
               onCommand={handleCommand}
               onSendReaction={sendReaction}

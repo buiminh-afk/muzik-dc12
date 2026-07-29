@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Send, Terminal, HelpCircle, Smile } from 'lucide-react';
+import { RoomUser } from './UsersList';
 
 export interface ChatMessage {
   id: string;
@@ -14,17 +15,37 @@ export interface ChatMessage {
 
 interface ChatBoxProps {
   messages: ChatMessage[];
+  username: string;
+  users: RoomUser[];
   onSendMessage: (text: string) => void;
   onCommand: (command: string, args: string) => void;
   onSendReaction?: (reaction: string) => void;
 }
 
-export default function ChatBox({ messages, onSendMessage, onCommand, onSendReaction }: ChatBoxProps) {
+const COMMANDS = [
+  { cmd: '/play', desc: 'Phát nhạc YouTube (link hoặc từ khóa)' },
+  { cmd: '/voteskip', desc: 'Bình chọn bỏ qua bài hát (vs)' },
+  { cmd: '/pause', desc: 'Tạm dừng nhạc (Chủ phòng)' },
+  { cmd: '/resume', desc: 'Tiếp tục phát nhạc (Chủ phòng)' },
+  { cmd: '/clear', desc: 'Xóa sạch danh sách chờ (Chủ phòng)' },
+  { cmd: '/queue', desc: 'Xem danh sách hàng đợi (q)' },
+  { cmd: '/help', desc: 'Xem toàn bộ hướng dẫn lệnh' }
+];
+
+export default function ChatBox({ messages, username, users, onSendMessage, onCommand, onSendReaction }: ChatBoxProps) {
   const [inputText, setInputText] = useState('');
   const [showHelp, setShowHelp] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  const [mentionSuggestions, setMentionSuggestions] = useState<string[]>([]);
+  const [commandSuggestions, setCommandSuggestions] = useState<{ cmd: string, desc: string }[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const reactionRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setSelectedSuggestionIndex(0);
+  }, [mentionSuggestions, commandSuggestions]);
 
   // Tự động cuộn xuống khi có tin nhắn mới
   useEffect(() => {
@@ -42,10 +63,79 @@ export default function ChatBox({ messages, onSendMessage, onCommand, onSendReac
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Mention & Command autocomplete khi gõ
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInputText(val);
+
+    if (val.startsWith('/') && !val.includes(' ')) {
+      const query = val.toLowerCase();
+      const filtered = COMMANDS.filter(c => c.cmd.startsWith(query));
+      setCommandSuggestions(filtered);
+      setMentionSuggestions([]);
+    } else {
+      setCommandSuggestions([]);
+      const atIndex = val.lastIndexOf('@');
+      if (atIndex !== -1) {
+        const query = val.slice(atIndex + 1).toLowerCase();
+        const filtered = users
+          .map(u => u.username)
+          .filter(name => name !== username && name !== 'Server Feeder' && name.toLowerCase().startsWith(query));
+        setMentionSuggestions(filtered);
+      } else {
+        setMentionSuggestions([]);
+      }
+    }
+  };
+
+  const insertMention = (name: string) => {
+    const atIndex = inputText.lastIndexOf('@');
+    const newText = inputText.slice(0, atIndex) + `@${name} `;
+    setInputText(newText);
+    setMentionSuggestions([]);
+    inputRef.current?.focus();
+  };
+
+  const insertCommand = (cmd: string) => {
+    setInputText(cmd + ' ');
+    setCommandSuggestions([]);
+    inputRef.current?.focus();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const hasCommand = commandSuggestions.length > 0;
+    const hasMention = mentionSuggestions.length > 0;
+
+    if (!hasCommand && !hasMention) return;
+
+    const totalSuggestions = hasCommand ? commandSuggestions.length : mentionSuggestions.length;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => Math.min(prev + 1, totalSuggestions - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => Math.max(prev - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (hasCommand) {
+        insertCommand(commandSuggestions[selectedSuggestionIndex].cmd);
+      } else if (hasMention) {
+        insertMention(mentionSuggestions[selectedSuggestionIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setCommandSuggestions([]);
+      setMentionSuggestions([]);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = inputText.trim();
     if (!text) return;
+    setMentionSuggestions([]);
+    setCommandSuggestions([]);
 
     if (text.startsWith('/')) {
       const match = text.match(/^\/([a-zA-Z]+)(?:\s+(.*))?$/);
@@ -61,6 +151,32 @@ export default function ChatBox({ messages, onSendMessage, onCommand, onSendReac
     }
     
     setInputText('');
+  };
+
+  // Hiển thị text có @mention highlight
+  const renderMessageText = (text: string, isMine: boolean) => {
+    if (!text.includes('@')) return <span>{text}</span>;
+    const parts = text.split(/(@\w+)/g);
+    return (
+      <span>
+        {parts.map((part, i) =>
+          part.startsWith('@') ? (
+            <span
+              key={i}
+              className={`font-bold px-0.5 rounded ${
+                part === `@${username}`
+                  ? 'text-yellow-300 bg-yellow-500/15'
+                  : 'text-cyan-300'
+              }`}
+            >
+              {part}
+            </span>
+          ) : (
+            <span key={i}>{part}</span>
+          )
+        )}
+      </span>
+    );
   };
 
   const getMessageStyle = (msg: ChatMessage) => {
@@ -153,16 +269,16 @@ export default function ChatBox({ messages, onSendMessage, onCommand, onSendReac
               </p>
             </div>
 
-            {/* Lệnh /skip */}
+            {/* Lệnh /voteskip */}
             <div className="flex flex-col gap-0.5 p-1 rounded hover:bg-white-02 transition-colors">
               <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>/skip</code>
+                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
+                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>/voteskip</code>
                 <span className="text-muted text-[10px]">hoặc</span>
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>/next</code>
+                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>/vs</code>
               </div>
               <p className="text-neutral-300 pl-3.5" style={{ fontSize: '10.5px' }}>
-                Bỏ qua bài hát hiện tại để chuyển sang bài tiếp theo.
+                Bình chọn bỏ qua bài — cần 60% người trong phòng đồng ý.
               </p>
             </div>
 
@@ -189,6 +305,17 @@ export default function ChatBox({ messages, onSendMessage, onCommand, onSendReac
                 Hiển thị danh sách các bài hát trong hàng chờ hiện tại.
               </p>
             </div>
+
+            {/* @mention */}
+            <div className="flex flex-col gap-0.5 p-1 rounded hover:bg-white-02 transition-colors">
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-pink-400" />
+                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>@username</code>
+              </div>
+              <p className="text-neutral-300 pl-3.5" style={{ fontSize: '10.5px' }}>
+                Nhắc đến ai đó trong chat — họ sẽ nhận thông báo.
+              </p>
+            </div>
           </div>
         </div>
       )}
@@ -208,7 +335,7 @@ export default function ChatBox({ messages, onSendMessage, onCommand, onSendReac
                 </div>
               )}
               <p className={isSystem ? 'leading-relaxed' : 'text-neutral-200 mt-0.5 break-words whitespace-pre-wrap'}>
-                {msg.text}
+                {isSystem ? msg.text : renderMessageText(msg.text, msg.username === username)}
               </p>
             </div>
           );
@@ -217,61 +344,166 @@ export default function ChatBox({ messages, onSendMessage, onCommand, onSendReac
       </div>
 
       {/* Ô Nhập liệu (Input Form) */}
-      <form onSubmit={handleSubmit} className="flex gap-2 items-center">
-        <input
-          type="text"
-          placeholder="Gõ tin nhắn hoặc lệnh (ví dụ: /play <link>)..."
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          className="glass-input flex-1 py-2 px-3 text-xs"
-          style={{ height: '36px' }}
-          maxLength={200}
-        />
-        
-        {/* Emoji Button */}
-        <div className="relative flex" ref={reactionRef}>
-          <button 
-            type="button" 
-            onClick={() => setShowReactions(!showReactions)}
-            className="glass-btn rounded-lg flex-shrink-0 flex items-center justify-center" 
-            style={{ cursor: 'pointer', width: '36px', height: '36px', padding: 0 }} 
-            title="Biểu cảm"
+      <div className="relative">
+        {/* Command autocomplete dropdown — xuất hiện BÊN TRÊN input */}
+        {commandSuggestions.length > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 'calc(100% + 6px)',
+              left: 0,
+              right: 0,
+              background: 'linear-gradient(135deg, #1a0c32, #0a0814)',
+              border: '1.5px solid rgba(168,85,247,0.5)',
+              borderRadius: '12px',
+              boxShadow: '0 -8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(168,85,247,0.1)',
+              backdropFilter: 'blur(16px)',
+              zIndex: 999,
+              overflow: 'hidden',
+            }}
           >
-            <Smile size={15} />
-          </button>
-          
-          {showReactions && (
-            <div 
-              className="absolute p-2 glass-card rounded-xl shadow-xl flex items-center gap-1 z-50 animate-fade-in" 
-              style={{ 
-                bottom: '100%', 
-                right: '0', 
-                marginBottom: '8px',
-                backgroundColor: 'var(--bg-primary)', 
-                border: '1px solid var(--glass-border)' 
-              }}
-            >
-              {['❤️', '🔥', '👍', '🎉', '😆'].map((emoji) => (
-                <button 
-                  key={emoji}
+            <div style={{ padding: '4px' }}>
+              {commandSuggestions.map((item, idx) => (
+                <button
+                  key={item.cmd}
                   type="button"
-                  onClick={() => {
-                    onSendReaction?.(emoji);
-                    setShowReactions(false);
-                  }} 
-                  className="text-lg hover:scale-125 transition-transform bg-white-5 p-1.5 rounded-full cursor-pointer border border-white-5"
+                  onClick={() => insertCommand(item.cmd)}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    background: idx === selectedSuggestionIndex ? 'rgba(168,85,247,0.25)' : 'transparent',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: 'white',
+                    textAlign: 'left',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(168,85,247,0.15)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = idx === selectedSuggestionIndex ? 'rgba(168,85,247,0.25)' : 'transparent')}
                 >
-                  {emoji}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ color: '#a855f7', fontFamily: 'monospace', fontWeight: 700 }}>/</span>
+                    <span style={{ fontWeight: 600, color: '#f8fafc' }}>{item.cmd.slice(1)}</span>
+                  </div>
+                  <span style={{ fontSize: '10px', color: '#94a3b8' }}>{item.desc}</span>
                 </button>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        <button type="submit" className="glass-btn rounded-lg flex-shrink-0 flex items-center justify-center" style={{ cursor: 'pointer', width: '36px', height: '36px', padding: 0 }} title="Gửi (Enter)">
-          <Send size={15} />
-        </button>
-      </form>
+        {/* Mention autocomplete dropdown — xuất hiện BÊN TRÊN input */}
+        {mentionSuggestions.length > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 'calc(100% + 6px)',
+              left: 0,
+              right: 0,
+              background: 'linear-gradient(135deg, #1a0c32, #0a0814)',
+              border: '1.5px solid rgba(168,85,247,0.5)',
+              borderRadius: '12px',
+              boxShadow: '0 -8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(168,85,247,0.1)',
+              backdropFilter: 'blur(16px)',
+              zIndex: 999,
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ padding: '4px' }}>
+              {mentionSuggestions.map((name, idx) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => insertMention(name)}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    background: idx === selectedSuggestionIndex ? 'rgba(168,85,247,0.25)' : 'transparent',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: 'white',
+                    textAlign: 'left',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(168,85,247,0.15)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = idx === selectedSuggestionIndex ? 'rgba(168,85,247,0.25)' : 'transparent')}
+                >
+                  <span style={{ color: '#22d3ee', fontFamily: 'monospace', fontWeight: 700 }}>@</span>
+                  <span style={{ fontWeight: 600, color: '#f8fafc' }}>{name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="flex gap-2 items-center">
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Gõ tin nhắn, lệnh /play, /vs... hoặc @tên"
+            value={inputText}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            className="glass-input flex-1 py-2 px-3 text-xs"
+            style={{ height: '36px' }}
+            maxLength={200}
+          />
+          {/* Emoji Button */}
+          <div className="relative flex" ref={reactionRef}>
+            <button 
+              type="button" 
+              onClick={() => setShowReactions(!showReactions)}
+              className="glass-btn rounded-lg flex-shrink-0 flex items-center justify-center" 
+              style={{ cursor: 'pointer', width: '36px', height: '36px', padding: 0 }} 
+              title="Biểu cảm"
+            >
+              <Smile size={15} />
+            </button>
+            
+            {showReactions && (
+              <div 
+                className="absolute p-2 glass-card rounded-xl shadow-xl flex items-center gap-1 z-50 animate-fade-in" 
+                style={{ 
+                  bottom: '100%', 
+                  right: '0', 
+                  marginBottom: '8px',
+                  backgroundColor: 'var(--bg-primary)', 
+                  border: '1px solid var(--glass-border)' 
+                }}
+              >
+                {['❤️', '🔥', '👍', '🎉', '😆', '🖕'].map((emoji) => (
+                  <button 
+                    key={emoji}
+                    type="button"
+                    onClick={() => {
+                      onSendReaction?.(emoji);
+                      setShowReactions(false);
+                    }} 
+                    className="text-lg hover:scale-125 transition-transform bg-white-5 p-1.5 rounded-full cursor-pointer border border-white-5"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button type="submit" className="glass-btn rounded-lg flex-shrink-0 flex items-center justify-center" style={{ cursor: 'pointer', width: '36px', height: '36px', padding: 0 }} title="Gửi (Enter)">
+            <Send size={15} />
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Loader2 } from 'lucide-react';
 
 interface SearchUIProps {
-  onAddVideo: (videoId: string, title: string, thumbnail: string) => void;
+  onAddVideo: (videoId: string, title: string, thumbnail: string, duration?: string) => void;
 }
 
 export default function SearchUI({ onAddVideo }: SearchUIProps) {
@@ -89,7 +89,7 @@ export default function SearchUI({ onAddVideo }: SearchUIProps) {
                   </div>
                   <button
                     onClick={() => {
-                      onAddVideo(res.videoId, res.title, res.thumbnail);
+                      onAddVideo(res.videoId, res.title, res.thumbnail, res.duration);
                       setShowSearchDropdown(false);
                       setSearchQuery('');
                     }}

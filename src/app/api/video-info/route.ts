@@ -42,10 +42,12 @@ export async function GET(request: Request) {
         clearTimeout(fallbackTimeoutId);
         if (noembedResponse.ok) {
           const data = await noembedResponse.json();
+          const duration = await fetchVideoDuration(targetUrl);
           return NextResponse.json({
             isPlaylist: false,
             title: data.title,
-            thumbnail_url: data.thumbnail_url
+            thumbnail_url: data.thumbnail_url,
+            duration
           });
         }
       } catch (err) {
@@ -55,16 +57,61 @@ export async function GET(request: Request) {
     }
 
     const data = await response.json();
+    const duration = await fetchVideoDuration(targetUrl);
     return NextResponse.json({
       isPlaylist: false,
       title: data.title,
-      thumbnail_url: data.thumbnail_url
+      thumbnail_url: data.thumbnail_url,
+      duration
     });
   } catch (error: any) {
     clearTimeout(timeoutId);
     console.error('Lỗi khi fetch thông tin video oembed:', error.name === 'AbortError' ? 'Timeout 2.5s' : error);
     return NextResponse.json({ error: 'Request timeout or network error' }, { status: 504 });
   }
+}
+
+// Helper to fetch watch page and parse duration
+async function fetchVideoDuration(targetUrl: string): Promise<string> {
+  try {
+    const res = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    });
+    if (res.ok) {
+      const html = await res.text();
+      let match = html.match(/<meta itemprop="duration" content="([^"]+)">/);
+      if (match) {
+        const iso = match[1]; // e.g. PT3M45S or PT1H2M3S
+        const parts = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        if (parts) {
+          const hours = parseInt(parts[1] || '0');
+          const minutes = parseInt(parts[2] || '0');
+          const seconds = parseInt(parts[3] || '0');
+          
+          if (hours > 0) {
+            return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+          } else {
+            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+          }
+        }
+      }
+
+      // Fallback: Parse lengthSeconds from youtube initial player response
+      const lengthMatch = html.match(/"lengthSeconds"\s*:\s*"(\d+)"/);
+      if (lengthMatch) {
+        const secs = parseInt(lengthMatch[1]);
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60);
+        return `${m}:${s.toString().padStart(2, '0')}`;
+      }
+    }
+  } catch (e) {
+    console.error('Error fetching video duration:', e);
+  }
+  return '';
 }
 
 /**
@@ -74,12 +121,23 @@ export async function GET(request: Request) {
 async function scrapePlaylist(playlistId: string) {
   const url = `https://www.youtube.com/feeds/videos.xml?playlist_id=${playlistId}`;
   
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    },
-    cache: 'no-store'
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw new Error('Timeout or network error fetching playlist RSS');
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to fetch playlist RSS: status ${response.status}`);

@@ -125,7 +125,6 @@ class MockRealtimeChannel {
       };
       
       this.broadcastChannel?.postMessage(data);
-      this.triggerLocal(payload.event, data.payload);
     }
     return Promise.resolve('ok');
   }

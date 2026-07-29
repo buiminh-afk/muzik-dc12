@@ -22,6 +22,9 @@ export interface PlaylistItem {
 
 interface QueueListProps {
   queue: PlaylistItem[];
+  isPlaying: boolean;
+  username: string;
+  isHost: boolean;
   onRemoveItem: (id: string) => void;
   onPlayIndex: (index: number) => void;
   onMoveToTop: (index: number) => void;
@@ -61,6 +64,9 @@ function QueueThumbnail({ videoId, title }: { videoId: string; title: string; ra
 
 export default function QueueList({
   queue,
+  isPlaying,
+  username,
+  isHost,
   onRemoveItem,
   onPlayIndex,
   onMoveToTop,
@@ -129,11 +135,11 @@ export default function QueueList({
           ) : (
             queue.map((item, index) => {
               const isPlayingNow = index === 0;
+              const isNextUp = index === 1; // bài kế tiếp, không cần đẩy lên nữa
 
               return (
                 <div
                   key={item.id}
-                  onClick={() => !isPlayingNow && onPlayIndex(index)}
                   className={`group relative flex items-center gap-4 px-4 py-3 w-full rounded-xl transition-all duration-200 border ${
                     isPlayingNow
                       ? 'queue-item-playing shadow-sm'
@@ -162,6 +168,8 @@ export default function QueueList({
                       className={`text-xs leading-snug truncate block w-full ${
                         isPlayingNow
                           ? 'font-bold text-purple-300'
+                          : isNextUp
+                          ? 'font-semibold text-cyan-300'
                           : 'font-semibold text-neutral-200 group-hover:text-white'
                       }`}
                       style={{ maxWidth: '400px' }}
@@ -170,8 +178,19 @@ export default function QueueList({
                       {item.title}
                     </h4>
 
-                    <p className="text-xs text-neutral-500 truncate block w-full mt-1">
-                      Thêm bởi <span className="text-neutral-400 font-medium">{item.addedBy}</span>
+                    <p className="text-xs text-neutral-500 truncate w-full mt-1 flex items-center gap-2 flex-wrap">
+                      {isNextUp && <span className="text-cyan-500/70 mr-1">▶ Tiếp theo •</span>}
+                      <span>Thêm bởi <span className="text-neutral-400 font-medium">{item.addedBy}</span></span>
+                      {isPlayingNow && (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                          isPlaying 
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isPlaying ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                          {isPlaying ? 'ON AIR' : 'PAUSED'}
+                        </span>
+                      )}
                     </p>
                   </div>
 
@@ -186,27 +205,33 @@ export default function QueueList({
                       </div>
                     ) : (
                       <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onMoveToTop(index);
-                          }}
-                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:text-purple-300 hover:bg-purple-500/20 active:scale-90 transition-all"
-                          title="Đưa lên phát tiếp"
-                        >
-                          <ArrowUpToLine size={16} />
-                        </div>
+                        {/* Nút đẩy lên phát tiếp - chỉ hiện cho host */}
+                        {isHost && !isNextUp && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onMoveToTop(index);
+                            }}
+                            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:text-purple-300 hover:bg-purple-500/20 active:scale-90 transition-all"
+                            title="Đưa lên phát tiếp"
+                          >
+                            <ArrowUpToLine size={16} />
+                          </div>
+                        )}
 
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRemoveItem(item.id);
-                          }}
-                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-rose-500/20 active:scale-90 transition-all"
-                          title="Xóa khỏi hàng đợi"
-                        >
-                          <X size={16} />
-                        </div>
+                        {/* Nút xoá - hiện cho host HOẶC người thêm bài */}
+                        {(isHost || item.addedBy === username) && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemoveItem(item.id);
+                            }}
+                            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-rose-500/20 active:scale-90 transition-all"
+                            title="Xóa khỏi hàng đợi"
+                          >
+                            <X size={16} />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

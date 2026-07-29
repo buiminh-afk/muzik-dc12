@@ -8,6 +8,7 @@ export interface RoomUser {
   color: string;
   joinedAt: string;
   isHost?: boolean;
+  videoFinished?: boolean;
 }
 
 interface UsersListProps {
@@ -26,8 +27,7 @@ export default function UsersList({ users, localRefId }: UsersListProps) {
       </div>
 
       <div 
-        className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2"
-        style={{ maxHeight: '100px' }}
+        className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2 scrollbar-thin"
       >
         {users.map((user) => {
           const isMe = user.presence_ref === localRefId;
