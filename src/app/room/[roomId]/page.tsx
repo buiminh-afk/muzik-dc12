@@ -10,7 +10,7 @@ export default async function RoomPage({ params }: PageProps) {
     ? await (params as any) 
     : params;
     
-  const roomId = (resolvedParams?.roomId || '').toUpperCase();
+  const roomId = decodeURIComponent(resolvedParams?.roomId || '').trim().toUpperCase();
 
   return <RoomClient roomId={roomId} />;
 }

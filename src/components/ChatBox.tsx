@@ -163,7 +163,7 @@ const ChatMessageList = React.memo(function ChatMessageList({
     <div
       ref={messagesContainerRef}
       onScroll={handleMessagesScroll}
-      className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2.5 mb-3 p-3 rounded-lg bg-black-20 border border-white-5 min-h-0"
+      className="flex-1 overflow-y-auto pr-1 flex flex-col mb-3 p-3 rounded-lg bg-black-20 border border-white-5 min-h-0"
     >
       {messages.map((msg, index) => {
         const isSystem = msg.isSystem || msg.isError;
@@ -181,7 +181,7 @@ const ChatMessageList = React.memo(function ChatMessageList({
           <div 
             key={msg.id} 
             className={`flex flex-col text-xs ${getMessageStyle(msg)} ${
-              isSystem ? 'my-1.5' : isGrouped ? 'mt-0.5 pl-3.5 relative' : 'mt-2.5'
+              isSystem ? 'my-1' : isGrouped ? 'mt-0-5 pl-3.5 relative' : 'mt-2'
             }`}
           >
             {!isSystem && !isGrouped && (

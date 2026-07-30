@@ -52,12 +52,15 @@ function loadYoutubeAPI(): Promise<any> {
       'script[src="https://www.youtube.com/iframe_api"]'
     );
 
-    const previousCallback = win.onYouTubeIframeAPIReady;
-
     const timeout = window.setTimeout(() => {
       youtubeApiPromise = null;
+      if (existingScript && existingScript.parentNode) {
+        existingScript.parentNode.removeChild(existingScript);
+      }
       reject(new Error('Timed out loading YouTube IFrame API'));
     }, 15000);
+
+    const previousCallback = win.onYouTubeIframeAPIReady;
 
     win.onYouTubeIframeAPIReady = () => {
       window.clearTimeout(timeout);
@@ -72,7 +75,18 @@ function loadYoutubeAPI(): Promise<any> {
       resolve(win.YT);
     };
 
-    if (existingScript) return;
+    if (existingScript) {
+      // Nếu script đã tồn tại trong DOM nhưng sự kiện ready chưa được gọi/hoặc bị lỡ (ví dụ do HMR/hot-reload),
+      // thiết lập kiểm tra định kỳ để giải phóng Promise khi YT.Player khả dụng.
+      const checkInterval = setInterval(() => {
+        if (win.YT?.Player) {
+          clearInterval(checkInterval);
+          window.clearTimeout(timeout);
+          resolve(win.YT);
+        }
+      }, 500);
+      return;
+    }
 
     const script = document.createElement('script');
     script.src = 'https://www.youtube.com/iframe_api';
@@ -81,6 +95,9 @@ function loadYoutubeAPI(): Promise<any> {
     script.onerror = () => {
       window.clearTimeout(timeout);
       youtubeApiPromise = null;
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
       reject(new Error('Failed to load YouTube IFrame API'));
     };
 
@@ -111,6 +128,8 @@ export default function YoutubePlayer({
   const [volume, setVolume] = useState(100);
   const [isMuted, setIsMuted] = useState(false);
   const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [waitingSeconds, setWaitingSeconds] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [playerDuration, setPlayerDuration] = useState(0);
   const [fetchedDuration, setFetchedDuration] = useState<string | undefined>(undefined);
@@ -242,6 +261,7 @@ export default function YoutubePlayer({
               const current = event.target.getCurrentTime?.() ?? 0;
               
               if (event.data === YT.PlayerState.PLAYING) {
+                setIsBuffering(false);
                 setIsAutoplayBlocked(false);
                 latestProps.current.onPlayerStateChange('PLAYING', current);
                 
@@ -258,6 +278,7 @@ export default function YoutubePlayer({
                   }
                 }
               } else if (event.data === YT.PlayerState.PAUSED) {
+                setIsBuffering(false);
                 latestProps.current.onPlayerStateChange('PAUSED', current);
                 
                 // Revert manual pause if app state is playing
@@ -265,7 +286,10 @@ export default function YoutubePlayer({
                   event.target.playVideo();
                   setIsAutoplayBlocked(true); // Autoplay might be blocked by browser
                 }
+              } else if (event.data === YT.PlayerState.BUFFERING || event.data === YT.PlayerState.UNSTARTED) {
+                setIsBuffering(true);
               } else if (event.data === YT.PlayerState.ENDED) {
+                setIsBuffering(false);
                 if (currentVideoId && endedTriggeredRef.current !== currentVideoId) {
                   endedTriggeredRef.current = currentVideoId;
                   latestProps.current.onVideoEnded();
@@ -311,6 +335,7 @@ export default function YoutubePlayer({
     const currentVideoId = data?.video_id ?? '';
 
     if (currentVideoId !== videoId) {
+      setIsBuffering(true); // Indicate loading for new video
       const startSeconds = seekTime ?? 0;
       if (isPlaying) {
         player.loadVideoById({
@@ -422,6 +447,20 @@ export default function YoutubePlayer({
     return () => clearInterval(interval);
   }, [videoId, playerReady]);
 
+  // Track waiting time for UI countdown
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isWaitingForOthers) {
+      setWaitingSeconds(0);
+      interval = setInterval(() => {
+        setWaitingSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      setWaitingSeconds(0);
+    }
+    return () => clearInterval(interval);
+  }, [isWaitingForOthers]);
+
   const activeDurationSeconds = totalDurationSeconds || playerDuration;
   const activeDurationFormatted = activeDuration || (activeDurationSeconds ? formatTime(activeDurationSeconds) : undefined);
 
@@ -496,9 +535,25 @@ export default function YoutubePlayer({
                 ? `Còn ${waitingCount} người chưa nghe xong bài này.`
                 : 'Tất cả đã nghe xong. Đang chuyển bài...'}
             </p>
+            {waitingSeconds > 3 && (
+              <p className="text-[11px] text-red-400/90 mt-2 font-mono bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">
+                Sẽ tự động chuyển bài sau {Math.max(0, 15 - waitingSeconds)}s
+              </p>
+            )}
             <p className="text-[10px] text-purple-400 mt-3 font-mono">
               Timeline chung • Chờ người cuối cùng
             </p>
+          </div>
+        )}
+
+        {/* Loading / Buffering Overlay */}
+        {(isBuffering || (!playerReady && videoId)) && !isWaitingForOthers && !isAutoplayBlocked && (
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center z-25 animate-fade-in pointer-events-none"
+            style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(2px)' }}
+          >
+            <div className="w-12 h-12 rounded-full border-4 border-purple-500/30 border-t-purple-500 animate-spin mb-3"></div>
+            <h3 className="font-semibold text-sm text-white">Đang tải nhạc...</h3>
           </div>
         )}
 
@@ -559,7 +614,7 @@ export default function YoutubePlayer({
               />
               <div 
                 className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full bg-[#08070e] border-4 border-[#242135] shadow-2xl flex items-center justify-center relative overflow-hidden ${
-                  isPlaying ? 'animate-spin-slow' : ''
+                  isPlaying && !isBuffering ? 'animate-spin-slow' : ''
                 }`}
                 style={{
                   boxShadow: '0 0 40px rgba(139, 92, 246, 0.15), inset 0 0 20px rgba(0,0,0,0.8)'

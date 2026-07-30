@@ -160,11 +160,6 @@ export default function SearchUI({ onAddVideo }: SearchUIProps) {
         thumbnailUrl: result.thumbnail,
         duration: result.duration,
       });
-
-      setSearchQuery('');
-      setSubmittedQuery('');
-      setSearchResults([]);
-      setShowSearchDropdown(false);
     } finally {
       setAddingVideoId(null);
     }

@@ -27,20 +27,20 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [theme, setTheme] = useState<string>('dark');
   const [showThemeMenu, setShowThemeMenu] = useState(false);
 
-  const THEMES = ['dark', 'light', 'glassmorphism'];
+  const THEMES = ['dark', 'light', 'cyberpunk', 'forest', 'ocean'];
 
   // Khôi phục theme từ localStorage
   useEffect(() => {
     const savedTheme = localStorage.getItem('yt_together_theme') || 'dark';
     setTheme(savedTheme);
-    document.body.classList.remove('dark', 'light', 'glassmorphism');
+    document.body.classList.remove('dark', 'light', 'cyberpunk', 'forest', 'ocean');
     document.body.classList.add(savedTheme);
   }, []);
 
   const handleSelectTheme = (newTheme: string) => {
     setTheme(newTheme);
     localStorage.setItem('yt_together_theme', newTheme);
-    document.body.classList.remove('dark', 'light', 'glassmorphism');
+    document.body.classList.remove('dark', 'light', 'cyberpunk', 'forest', 'ocean');
     document.body.classList.add(newTheme);
   };
 
@@ -51,6 +51,34 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [color, setColor] = useState('#00F0FF');
   const [localRefId, setLocalRefId] = useState<string | null>(null);
   const [users, setUsers] = useState<RoomUser[]>([]);
+  const [dbHostClientId, setDbHostClientId] = useState<string | null>(null);
+
+  // Helper update DB
+  const updateRoomInDb = async (updates: {
+    is_playing?: boolean;
+    seek_time?: number;
+    queue?: PlaylistItem[];
+    host_client_id?: string;
+    current_video_id?: string | null;
+  }) => {
+    if (!isSupabaseConfigured || !supabase) return;
+    
+    try {
+      const { error } = await (supabase as any)
+        .from('rooms')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', roomId);
+        
+      if (error) {
+        console.error('[RoomClient] Lỗi cập nhật DB:', error);
+      }
+    } catch (err) {
+      console.error('[RoomClient] Lỗi gọi API cập nhật DB:', err);
+    }
+  };
   
   // State quản lý trình phát & queue
   const [queue, setQueue] = useState<PlaylistItem[]>([]);
@@ -99,6 +127,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const finishedItemIdRef = useRef<string | null>(null);
   const skipVotesRef = useRef<Set<string>>(new Set());
   const skipVoteItemIdRef = useRef<string | null>(null);
+  const hasReceivedInitialSyncRef = useRef<boolean>(false);
 
   // Helper hiển thị tin nhắn hệ thống
   const addSystemMessage = (text: string, isError = false) => {
@@ -173,8 +202,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   // ===== PERSISTENCE: Lưu/phục hồi hàng đợi từ localStorage =====
   const storageKey = `yt_together_room_${roomId}`;
 
-  // Phục hồi queue từ localStorage khi mount
+  // Phục hồi queue từ localStorage khi mount (Chỉ ở chế độ offline)
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
@@ -189,8 +219,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
   }, [roomId]);
 
-  // Lưu queue vào localStorage mỗi khi thay đổi
+  // Lưu queue vào localStorage mỗi khi thay đổi (Chỉ ở chế độ offline)
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     try {
       localStorage.setItem(storageKey, JSON.stringify({
         queue,
@@ -347,12 +378,22 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         setQueue(payload.queue);
       })
       .on('broadcast', { event: 'playback_state' }, ({ payload }: any) => {
-        setIsPlaying(payload.isPlaying);
-        if (payload.seekTime !== undefined && payload.seekTime !== null) {
-          const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
-          setSeekTime(payload.seekTime + (payload.isPlaying ? latency : 0));
-          setTimeout(() => setSeekTime(null), 100);
+        const isCurrentHost = isSupabaseConfigured
+          ? dbHostClientId === clientIdRef.current
+          : false;
+
+        // Chỉ nhận đồng bộ nếu mình không phải Host
+        if (!isCurrentHost) {
+          setIsPlaying(payload.isPlaying);
+          if (payload.seekTime !== undefined && payload.seekTime !== null) {
+            const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
+            setSeekTime(payload.seekTime + (payload.isPlaying ? latency : 0));
+            setTimeout(() => setSeekTime(null), 100);
+          }
         }
+      })
+      .on('broadcast', { event: 'host_changed' }, ({ payload }: any) => {
+        setDbHostClientId(payload.hostClientId);
       })
       .on('broadcast', { event: 'emoji_reaction' }, ({ payload }: any) => {
         const x = 15 + Math.random() * 70;
@@ -362,23 +403,29 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         }, 2500);
       })
       .on('broadcast', { event: 'request_sync' }, ({ payload }: any) => {
+        if (isSupabaseConfigured) return;
         if (payload.requesterId === clientIdRef.current) return;
-        const activeUsers = usersRef.current;
-        if (activeUsers.length === 0 || queueRef.current.length === 0) return;
+        if (queueRef.current.length === 0) return; // Không có gì để sync
 
+        const activeUsers = usersRef.current;
         const host = activeUsers.find(u => u.isHost);
 
-        let shouldISync = false;
+        let isPrimarySyncer = false;
         if (host) {
-          shouldISync = host.clientId === clientIdRef.current;
-        } else {
+          isPrimarySyncer = host.clientId === clientIdRef.current;
+        } else if (activeUsers.length > 0) {
           const oldestUser = [...activeUsers].sort((a, b) => 
             new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
           )[0];
-          shouldISync = oldestUser?.clientId === clientIdRef.current;
+          isPrimarySyncer = oldestUser?.clientId === clientIdRef.current;
+        } else {
+          isPrimarySyncer = true; // Fallback an toàn
         }
 
-        if (shouldISync) {
+        // Host gửi ngay lập tức, các client khác chờ 1.5s - 3s để gửi dự phòng
+        const delay = isPrimarySyncer ? 0 : Math.random() * 1500 + 1500;
+
+        setTimeout(() => {
           channel.send({
             type: 'broadcast',
             event: 'sync_state',
@@ -387,14 +434,20 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               isPlaying: isPlayingRef.current,
               currentTime: playerTimeRef.current,
               targetClientId: payload.requesterId,
-              sentAt: Date.now()
+              sentAt: Date.now(),
+              isFallback: !isPrimarySyncer
             }
           });
-        }
+        }, delay);
       })
       .on('broadcast', { event: 'sync_state' }, ({ payload }: any) => {
+        if (isSupabaseConfigured) return;
         const isMyTarget = payload.targetClientId === clientIdRef.current;
         if (isMyTarget && payload.queue) {
+          // Chỉ nhận sync 1 lần đầu tiên hoặc khi chủ động ấn nút Đồng bộ (nút đồng bộ sẽ reset ref này)
+          if (hasReceivedInitialSyncRef.current) return;
+          hasReceivedInitialSyncRef.current = true;
+
           setQueue(payload.queue);
           setIsPlaying(payload.isPlaying);
           if (Number.isFinite(payload.currentTime)) {
@@ -403,7 +456,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             setSeekTime(targetTime);
             setTimeout(() => setSeekTime(null), 100);
           }
-          addSystemMessage(`🔄 Đã đồng bộ thành công với phòng.`);
+          addSystemMessage(`🔄 Đã đồng bộ thành công với phòng ${payload.isFallback ? '(từ máy chủ dự phòng)' : ''}.`);
         }
       });
 
@@ -432,62 +485,90 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       // Sắp xếp theo thời gian tham gia để xác định thứ tự
       onlineUsers.sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
 
-      // Dynamic Host Election
-      let canonicalHostRef: string | null = null;
-      const hostUsers = onlineUsers.filter(u => u.isHost);
-      if (hostUsers.length === 1) {
-        canonicalHostRef = hostUsers[0].presence_ref;
-      } else if (hostUsers.length > 1) {
-        const sortedHosts = [...hostUsers].sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
-        canonicalHostRef = sortedHosts[0].presence_ref;
-      } else if (onlineUsers.length > 0) {
-        canonicalHostRef = onlineUsers[0].presence_ref;
-      }
-
-      const myRefId = localRefIdRef.current;
-      const normalisedUsers = onlineUsers.map(u => ({
-        ...u,
-        isHost: u.presence_ref === canonicalHostRef
-      }));
-
-      // Bầu chủ phòng mới nếu mình được chọn
-      const myPresence = getCurrentUser(onlineUsers);
-      const isCanonicalHost = myPresence && myPresence.presence_ref === canonicalHostRef;
-
-      if (isCanonicalHost) {
-        if (myPresence && !myPresence.isHost) {
-          channel.track({
-            clientId: clientIdRef.current,
-            username,
-            color,
-            joinedAt: myPresence.joinedAt,
-            isHost: true,
-            videoFinished: myPresence.videoFinished || false,
-            finishedItemId: myPresence.finishedItemId || null,
-            votedToSkip: myPresence.votedToSkip || false
-          }).catch((err: any) => console.warn('Track host update error:', err));
-          addSystemMessage('👑 Bạn đã trở thành Chủ phòng mới!');
+      if (isSupabaseConfigured) {
+        // --- CHẾ ĐỘ ĐỒNG BỘ QUA DATABASE ---
+        const isHostOnline = dbHostClientId ? onlineUsers.some(u => u.clientId === dbHostClientId) : false;
+        
+        if (!isHostOnline && onlineUsers.length > 0) {
+          // Chưa có Host hoặc Host hiện tại đã offline. Bầu chọn người online lâu nhất làm Host mới
+          const oldestUser = onlineUsers[0];
+          
+          if (oldestUser.clientId === clientIdRef.current) {
+            console.log('[RoomClient] Bầu chọn Host mới...');
+            updateRoomInDb({ host_client_id: clientIdRef.current });
+            channel.send({
+              type: 'broadcast',
+              event: 'host_changed',
+              payload: { hostClientId: clientIdRef.current }
+            });
+            setDbHostClientId(clientIdRef.current);
+            if (dbHostClientId) {
+              addSystemMessage('👑 Chủ phòng cũ đã ngắt kết nối. Bạn đã trở thành Chủ phòng mới!');
+            }
+          }
         }
-      }
 
-      // Nhường chủ phòng nếu phát hiện người khác hợp lệ hơn
-      if (!isCanonicalHost) {
-        if (myPresence && myPresence.isHost) {
-          channel.track({
-            clientId: clientIdRef.current,
-            username,
-            color,
-            joinedAt: myPresence.joinedAt,
-            isHost: false,
-            videoFinished: myPresence.videoFinished || false,
-            finishedItemId: myPresence.finishedItemId || null,
-            votedToSkip: myPresence.votedToSkip || false
-          }).catch((err: any) => console.warn('Track host step down error:', err));
+        usersRef.current = onlineUsers;
+        setUsers(onlineUsers);
+      } else {
+        // --- CHẾ ĐỘ OFFLINE / MOCK BROADCAST ---
+        // Dynamic Host Election
+        let canonicalHostRef: string | null = null;
+        const hostUsers = onlineUsers.filter(u => u.isHost);
+        if (hostUsers.length === 1) {
+          canonicalHostRef = hostUsers[0].presence_ref;
+        } else if (hostUsers.length > 1) {
+          const sortedHosts = [...hostUsers].sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
+          canonicalHostRef = sortedHosts[0].presence_ref;
+        } else if (onlineUsers.length > 0) {
+          canonicalHostRef = onlineUsers[0].presence_ref;
         }
-      }
 
-      usersRef.current = normalisedUsers;
-      setUsers(normalisedUsers);
+        const myRefId = localRefIdRef.current;
+        const normalisedUsers = onlineUsers.map(u => ({
+          ...u,
+          isHost: u.presence_ref === canonicalHostRef
+        }));
+
+        // Bầu chủ phòng mới nếu mình được chọn
+        const myPresence = getCurrentUser(onlineUsers);
+        const isCanonicalHost = myPresence && myPresence.presence_ref === canonicalHostRef;
+
+        if (isCanonicalHost) {
+          if (myPresence && !myPresence.isHost) {
+            channel.track({
+              clientId: clientIdRef.current,
+              username,
+              color,
+              joinedAt: myPresence.joinedAt,
+              isHost: true,
+              videoFinished: myPresence.videoFinished || false,
+              finishedItemId: myPresence.finishedItemId || null,
+              votedToSkip: myPresence.votedToSkip || false
+            }).catch((err: any) => console.warn('Track host update error:', err));
+            addSystemMessage('👑 Bạn đã trở thành Chủ phòng mới!');
+          }
+        }
+
+        // Nhường chủ phòng nếu phát hiện người khác hợp lệ hơn
+        if (!isCanonicalHost) {
+          if (myPresence && myPresence.isHost) {
+            channel.track({
+              clientId: clientIdRef.current,
+              username,
+              color,
+              joinedAt: myPresence.joinedAt,
+              isHost: false,
+              videoFinished: myPresence.videoFinished || false,
+              finishedItemId: myPresence.finishedItemId || null,
+              votedToSkip: myPresence.votedToSkip || false
+            }).catch((err: any) => console.warn('Track host step down error:', err));
+          }
+        }
+
+        usersRef.current = normalisedUsers;
+        setUsers(normalisedUsers);
+      }
       
       const myRef = Object.keys(state).find(key => {
         const list = state[key];
@@ -498,13 +579,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       }
 
       // Check if everyone is finished (Only Host coordinates this)
-      const isCurrentHost = normalisedUsers.find(u => u.clientId === clientIdRef.current)?.isHost;
-      if (isCurrentHost && normalisedUsers.length > 0) {
+      const isCurrentHost = isSupabaseConfigured
+        ? dbHostClientId === clientIdRef.current
+        : onlineUsers.find(u => u.clientId === clientIdRef.current)?.isHost;
+        
+      if (isCurrentHost && onlineUsers.length > 0) {
         const currentVideo = queueRef.current.length > 0 ? queueRef.current[0] : null;
         const currentItemId = currentVideo ? currentVideo.id : null;
         
         // Everyone must have finished the CURRENT active song item ID
-        const allFinished = currentItemId && normalisedUsers.every(u => u.finishedItemId === currentItemId);
+        const allFinished = currentItemId && onlineUsers.every(u => u.finishedItemId === currentItemId);
 
         if (allFinished && currentItemId && advancedItemIdRef.current !== currentItemId) {
           advancedItemIdRef.current = currentItemId;
@@ -529,19 +613,21 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             username,
             color,
             joinedAt: new Date().toISOString(),
-            isHost: isFirst,
+            isHost: isSupabaseConfigured ? false : isFirst,
             videoFinished: false,
             finishedItemId: null,
             votedToSkip: false
           });
 
-          syncTimeoutId = setTimeout(() => {
-            channel.send({
-              type: 'broadcast',
-              event: 'request_sync',
-              payload: { requesterId: clientIdRef.current }
-            });
-          }, 1000);
+          if (!isSupabaseConfigured) {
+            syncTimeoutId = setTimeout(() => {
+              channel.send({
+                type: 'broadcast',
+                event: 'request_sync',
+                payload: { requesterId: clientIdRef.current }
+              });
+            }, 1000);
+          }
           break;
         }
 
@@ -561,7 +647,15 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       }
     });
 
+    // Lắng nghe sự kiện đóng tab/trình duyệt để dọn dẹp ghost connection ngay lập tức
+    const handleBeforeUnload = () => {
+      if (channel) channel.untrack();
+      if (lobby) lobby.untrack();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       if (pingInterval) {
         clearInterval(pingInterval);
       }
@@ -575,7 +669,76 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         supabase.removeChannel(lobby);
       }
     };
-  }, [username, color, roomId]);
+  }, [username, color, roomId, dbHostClientId]);
+
+  // Khởi tạo phòng trong Database khi mount
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || !username) return;
+
+    const initRoom = async () => {
+      try {
+        const { data: room, error } = await (supabase as any)
+          .from('rooms')
+          .select('*')
+          .eq('id', roomId)
+          .single();
+
+        if (error || !room) {
+          console.log('[RoomClient] Không tìm thấy phòng, đang khởi tạo...');
+          const { error: insertError } = await (supabase as any)
+            .from('rooms')
+            .insert({
+              id: roomId,
+              name: roomName,
+              host_client_id: clientIdRef.current,
+              is_playing: false,
+              seek_time: 0,
+              queue: []
+            });
+
+          if (insertError) {
+            console.error('[RoomClient] Lỗi khởi tạo phòng:', insertError);
+          } else {
+            setQueue([]);
+            setIsPlaying(false);
+            setDbHostClientId(clientIdRef.current);
+            addSystemMessage('👑 Bạn đã khởi tạo phòng và trở thành Chủ phòng!');
+          }
+        } else {
+          console.log('[RoomClient] Đã tìm thấy phòng, đồng bộ dữ liệu...');
+          setQueue(((room as any).queue as PlaylistItem[]) || []);
+          setIsPlaying((room as any).is_playing || false);
+          setDbHostClientId((room as any).host_client_id);
+          if (Number.isFinite((room as any).seek_time)) {
+            setSeekTime((room as any).seek_time);
+            setTimeout(() => setSeekTime(null), 100);
+          }
+        }
+      } catch (err) {
+        console.error('[RoomClient] Lỗi khởi tạo phòng:', err);
+      }
+    };
+
+    initRoom();
+  }, [username, roomId]);
+
+
+
+  // Định kỳ cập nhật thời gian phát nhạc từ Host lên DB (mỗi 5s)
+  useEffect(() => {
+    if (!isSupabaseConfigured || !isPlaying) return;
+    
+    const isCurrentHost = dbHostClientId === clientIdRef.current;
+    if (!isCurrentHost) return;
+
+    const interval = setInterval(() => {
+      if (isPlayingRef.current) {
+        updateRoomInDb({ seek_time: playerTimeRef.current });
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isPlaying, dbHostClientId]);
 
   // Cập nhật số lượng người trong phòng lên Lobby Presence
   useEffect(() => {
@@ -618,7 +781,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       username,
       color,
       joinedAt: me ? me.joinedAt : new Date().toISOString(),
-      isHost: me ? me.isHost || false : false,
+      isHost: isSupabaseConfigured ? false : (me ? me.isHost || false : false),
       videoFinished: false,
       finishedItemId: null,
       votedToSkip: false
@@ -631,7 +794,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const handleCommand = async (cmd: string, args: string) => {
     if (!channelRef.current) return;
     
-    const isCurrentHost = usersRef.current.find(u => u.presence_ref === localRefIdRef.current)?.isHost;
+    const isCurrentHost = isSupabaseConfigured
+      ? dbHostClientId === clientIdRef.current
+      : usersRef.current.find(u => u.presence_ref === localRefIdRef.current)?.isHost;
 
     switch (cmd) {
       case 'play':
@@ -668,26 +833,28 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
                 const newQueue = [...queueRef.current, ...newItems];
 
-                // 1. Gửi broadcast cập nhật queue cho các client khác
+                if (isSupabaseConfigured) {
+                  await updateRoomInDb({ queue: newQueue });
+                }
+
                 channelRef.current.send({
                   type: 'broadcast',
                   event: 'queue_update',
                   payload: { queue: newQueue }
                 });
-
-                // 2. Cập nhật local state cho chính người gửi
                 setQueue(newQueue);
 
                 broadcastSystemMessage(`🎵 ${username} đã thêm danh sách phát "${data.playlistTitle}" (${newItems.length} bài hát) vào hàng đợi.`);
 
-                // Nếu queue trước đó rỗng, tự động phát luôn bài đầu tiên của playlist
                 if (newQueue.length === newItems.length) {
+                  if (isSupabaseConfigured) {
+                    await updateRoomInDb({ is_playing: true, seek_time: 0 });
+                  }
                   channelRef.current.send({
                     type: 'broadcast',
                     event: 'playback_state',
                     payload: { isPlaying: true, seekTime: 0 }
                   });
-                  // Cập nhật local state
                   setIsPlaying(true);
                   setSeekTime(0);
                   setTimeout(() => setSeekTime(null), 100);
@@ -740,17 +907,23 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
         const newQueue = [...queueRef.current, newItem];
         
+        if (isSupabaseConfigured) {
+          await updateRoomInDb({ queue: newQueue });
+        }
+
         channelRef.current.send({
           type: 'broadcast',
           event: 'queue_update',
           payload: { queue: newQueue }
         });
-
         setQueue(newQueue);
 
         broadcastSystemMessage(`🎵 ${username} đã thêm bài hát: "${title}" vào hàng đợi.`);
 
         if (newQueue.length === 1) {
+          if (isSupabaseConfigured) {
+            await updateRoomInDb({ is_playing: true, seek_time: 0 });
+          }
           channelRef.current.send({
             type: 'broadcast',
             event: 'playback_state',
@@ -768,12 +941,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           addSystemMessage('❌ Chỉ Chủ phòng mới có quyền tạm dừng/phát nhạc.', true);
           return;
         }
+        if (isSupabaseConfigured) {
+          await updateRoomInDb({ is_playing: false, seek_time: playerTimeRef.current });
+        }
         channelRef.current.send({
           type: 'broadcast',
           event: 'playback_state',
-          payload: { isPlaying: false, sentAt: Date.now() }
+          payload: { isPlaying: false, seekTime: playerTimeRef.current, sentAt: Date.now() }
         });
-        // Cập nhật local state
         setIsPlaying(false);
         broadcastSystemMessage(`⏸️ ${username} đã tạm dừng trình phát.`);
         break;
@@ -789,12 +964,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           addSystemMessage('Hàng đợi đang trống. Vui lòng thêm bài hát trước bằng lệnh /play', true);
           return;
         }
+        if (isSupabaseConfigured) {
+          await updateRoomInDb({ is_playing: true, seek_time: playerTimeRef.current });
+        }
         channelRef.current.send({
           type: 'broadcast',
           event: 'playback_state',
-          payload: { isPlaying: true, sentAt: Date.now() }
+          payload: { isPlaying: true, seekTime: playerTimeRef.current, sentAt: Date.now() }
         });
-        // Cập nhật local state
         setIsPlaying(true);
         broadcastSystemMessage(`▶️ ${username} đã tiếp tục phát nhạc.`);
         break;
@@ -827,7 +1004,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           username,
           color,
           joinedAt: me ? me.joinedAt : new Date().toISOString(),
-          isHost: me ? me.isHost || false : false,
+          isHost: isSupabaseConfigured ? false : (me ? me.isHost || false : false),
           videoFinished: me ? me.videoFinished || false : false,
           finishedItemId: me ? me.finishedItemId || null : null,
           votedToSkip: true
@@ -851,9 +1028,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
          * Supabase broadcast thường không echo lại sender.
          * Nếu chính người vote là host thì phải xử lý local.
          */
-        const isSelfHost = usersRef.current.some(
-          user => user.clientId === myClientId && user.isHost
-        );
+        const isSelfHost = isSupabaseConfigured
+          ? dbHostClientId === myClientId
+          : usersRef.current.some(user => user.clientId === myClientId && user.isHost);
 
         if (isSelfHost) {
           processSkipVote(myClientId, username, currentItem.id);
@@ -1114,10 +1291,23 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
     // Nếu chỉ có 1 mình trong phòng (hoặc chưa có ai đồng bộ), tự động next luôn không cần qua server sync
     const activeUsers = usersRef.current;
+    const isCurrentHost = activeUsers.find(u => u.clientId === clientIdRef.current)?.isHost;
+    
     if (activeUsers.length <= 1) {
       playNextSongRef.current();
       return;
     }
+
+    // [Fallback Chống Ghost User / Host Bị Treo] 
+    // Host sẽ ép chuyển bài sau 10s. Các user khác sẽ ép chuyển bài sau 15s (dự phòng trường hợp host bị treo).
+    const timeoutMs = isCurrentHost ? 10000 : 15000;
+    
+    setTimeout(() => {
+      if (finishedItemIdRef.current === currentItemId && queueRef.current.length > 0 && queueRef.current[0].id === currentItemId) {
+        console.log(`[Auto-Next Fallback] Kích hoạt chuyển bài (Sau ${timeoutMs/1000}s chờ).`);
+        playNextSongRef.current();
+      }
+    }, timeoutMs);
 
     channelRef.current.track({
       clientId: clientIdRef.current,
@@ -1134,26 +1324,35 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     showToast('⌛ Đang đợi các thành viên khác...');
   };
 
-  const playNextSong = () => {
-    if (!channelRef.current) return;
-    
+  const playNextSong = async () => {
     skipVotesRef.current.clear();
     skipVoteItemIdRef.current = null;
     
     if (queueRef.current.length > 1) {
       const newQueue = queueRef.current.slice(1);
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'queue_update',
-        payload: { queue: newQueue }
-      });
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'playback_state',
-        payload: { isPlaying: true, seekTime: 0, sentAt: Date.now() }
-      });
       
-      // Cập nhật local state
+      if (isSupabaseConfigured) {
+        await updateRoomInDb({
+          queue: newQueue,
+          current_video_id: newQueue[0].videoId,
+          is_playing: true,
+          seek_time: 0
+        });
+      }
+      
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'queue_update',
+          payload: { queue: newQueue }
+        });
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'playback_state',
+          payload: { isPlaying: true, seekTime: 0, sentAt: Date.now() }
+        });
+      }
+      
       setQueue(newQueue);
       setIsPlaying(true);
       setSeekTime(0);
@@ -1161,18 +1360,28 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       
       broadcastSystemMessage(`🎵 Bài hát kết thúc. Đang tự động phát bài kế tiếp: "${newQueue[0].title}"`);
     } else {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'queue_update',
-        payload: { queue: [] }
-      });
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'playback_state',
-        payload: { isPlaying: false, seekTime: 0, sentAt: Date.now() }
-      });
+      if (isSupabaseConfigured) {
+        await updateRoomInDb({
+          queue: [],
+          current_video_id: null,
+          is_playing: false,
+          seek_time: 0
+        });
+      }
       
-      // Cập nhật local state
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'queue_update',
+          payload: { queue: [] }
+        });
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'playback_state',
+          payload: { isPlaying: false, seekTime: 0, sentAt: Date.now() }
+        });
+      }
+      
       setQueue([]);
       setIsPlaying(false);
       setSeekTime(0);
@@ -1183,31 +1392,39 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   };
   playNextSongRef.current = playNextSong;
 
-  const handleLocalSeek = (time: number) => {
-    if (!channelRef.current) return;
-    const isCurrentHost = usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
+  const handleLocalSeek = async (time: number) => {
+    const isCurrentHost = isSupabaseConfigured
+      ? dbHostClientId === clientIdRef.current
+      : usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
     if (!isCurrentHost) return;
     
     playerTimeRef.current = time;
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'playback_state',
-      payload: {
-        isPlaying: isPlaying,
-        seekTime: time
-      }
-    });
+    if (isSupabaseConfigured) {
+      await updateRoomInDb({ seek_time: time });
+    }
+    
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'playback_state',
+        payload: {
+          isPlaying: isPlaying,
+          seekTime: time,
+          sentAt: Date.now()
+        }
+      });
+    }
     broadcastSystemMessage(`⏩ ${username} đã tua nhạc tới mốc ${Math.floor(time)} giây.`);
   };
 
-  const handleRemoveItem = (id: string) => {
-    if (!channelRef.current) return;
-    
+  const handleRemoveItem = async (id: string) => {
     const itemIndex = queueRef.current.findIndex(item => item.id === id);
     if (itemIndex === -1) return;
 
     const removedItem = queueRef.current[itemIndex];
-    const isCurrentHost = usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
+    const isCurrentHost = isSupabaseConfigured
+      ? dbHostClientId === clientIdRef.current
+      : usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
     const isOwner = removedItem.addedBy === username;
 
     if (!isCurrentHost && !isOwner) {
@@ -1215,40 +1432,48 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       return;
     }
 
-    let newQueue = queueRef.current.filter(item => item.id !== id);
+    const newQueue = queueRef.current.filter(item => item.id !== id);
 
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'queue_update',
-      payload: { queue: newQueue }
-    });
-    // Cập nhật local state
+    if (isSupabaseConfigured) {
+      await updateRoomInDb({ queue: newQueue });
+    }
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'queue_update',
+        payload: { queue: newQueue }
+      });
+    }
     setQueue(newQueue);
 
     broadcastSystemMessage(`🗑️ ${username} đã xóa bài: "${removedItem.title}" khỏi hàng đợi.`);
 
     if (itemIndex === 0) {
       const nextIsPlaying = newQueue.length > 0;
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'playback_state',
-        payload: {
-          isPlaying: nextIsPlaying,
-          seekTime: 0
-        }
-      });
-      // Cập nhật local state
+      if (isSupabaseConfigured) {
+        await updateRoomInDb({ is_playing: nextIsPlaying, seek_time: 0 });
+      }
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'playback_state',
+          payload: {
+            isPlaying: nextIsPlaying,
+            seekTime: 0,
+            sentAt: Date.now()
+          }
+        });
+      }
       setIsPlaying(nextIsPlaying);
       setSeekTime(0);
       setTimeout(() => setSeekTime(null), 100);
     }
   };
 
-  const handlePlayItem = (itemId: string) => {
-    if (!channelRef.current) return;
-
-    // Check host status
-    const isCurrentHost = usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
+  const handlePlayItem = async (itemId: string) => {
+    const isCurrentHost = isSupabaseConfigured
+      ? dbHostClientId === clientIdRef.current
+      : usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
     if (!isCurrentHost) return;
 
     const index = queueRef.current.findIndex(item => item.id === itemId);
@@ -1258,18 +1483,28 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     const remainingItems = queueRef.current.filter(item => item.id !== itemId);
     const newQueue = [targetItem, ...remainingItems];
 
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'queue_update',
-      payload: { queue: newQueue }
-    });
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'playback_state',
-      payload: { isPlaying: true, seekTime: 0 }
-    });
+    if (isSupabaseConfigured) {
+      await updateRoomInDb({
+        queue: newQueue,
+        current_video_id: targetItem.videoId,
+        is_playing: true,
+        seek_time: 0
+      });
+    }
     
-    // Cập nhật local state
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'queue_update',
+        payload: { queue: newQueue }
+      });
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'playback_state',
+        payload: { isPlaying: true, seekTime: 0, sentAt: Date.now() }
+      });
+    }
+    
     setQueue(newQueue);
     setIsPlaying(true);
     setSeekTime(0);
@@ -1278,11 +1513,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     broadcastSystemMessage(`🎵 ${username} đã phát trực tiếp bài hát: "${targetItem.title}"`);
   };
 
-  const handleMoveNext = (itemId: string) => {
-    if (!channelRef.current) return;
-
-    // Check host status
-    const isCurrentHost = usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
+  const handleMoveNext = async (itemId: string) => {
+    const isCurrentHost = isSupabaseConfigured
+      ? dbHostClientId === clientIdRef.current
+      : usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
     if (!isCurrentHost) return;
 
     const index = queueRef.current.findIndex(item => item.id === itemId);
@@ -1291,7 +1525,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     const selectedItem = queueRef.current[index];
     if (!selectedItem) return;
 
-    // Giữ nguyên bài đang phát ở index 0, đưa bài được chọn lên làm bài tiếp theo (index 1)
     const newQueue = [
       queueRef.current[0],
       selectedItem,
@@ -1299,19 +1532,24 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       ...queueRef.current.slice(index + 1),
     ];
 
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'queue_update',
-      payload: { queue: newQueue },
-    });
-
+    if (isSupabaseConfigured) {
+      await updateRoomInDb({ queue: newQueue });
+    }
+    
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'queue_update',
+        payload: { queue: newQueue },
+      });
+    }
     setQueue(newQueue);
     broadcastSystemMessage(
       `⏫ ${username} đã đưa "${selectedItem.title}" lên phát tiếp.`
     );
   };
 
-  const handlePlaylistLoaded = (videoIds: string[]) => {
+  const handlePlaylistLoaded = async (videoIds: string[]) => {
     if (!videoIds || videoIds.length === 0) return;
 
     const newItems: PlaylistItem[] = videoIds.map((id) => ({
@@ -1324,30 +1562,40 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
     const newQueue = [...queueRef.current, ...newItems];
 
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'queue_update',
-      payload: { queue: newQueue }
-    });
+    if (isSupabaseConfigured) {
+      await updateRoomInDb({ queue: newQueue });
+    }
+    
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'queue_update',
+        payload: { queue: newQueue }
+      });
+    }
     setQueue(newQueue);
-
+    
     broadcastSystemMessage(`🎵 ${username} đã thêm danh sách phát YouTube (${newItems.length} bài hát) vào hàng đợi.`);
 
     if (newQueue.length === newItems.length) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'playback_state',
-        payload: { isPlaying: true, seekTime: 0 }
-      });
+      if (isSupabaseConfigured) {
+        await updateRoomInDb({ is_playing: true, seek_time: 0 });
+      }
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'playback_state',
+          payload: { isPlaying: true, seekTime: 0, sentAt: Date.now() }
+        });
+      }
       setIsPlaying(true);
       setSeekTime(0);
       setTimeout(() => setSeekTime(null), 100);
     }
-
     setPlaylistIdToLoad(null);
   };
 
-  const handleVideoTitleLoaded = (videoId: string, title: string) => {
+  const handleVideoTitleLoaded = async (videoId: string, title: string) => {
     if (!title || title === 'YouTube Video') return;
 
     const updatedQueue = queueRef.current.map((item) => {
@@ -1359,12 +1607,18 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
     const hasChange = JSON.stringify(updatedQueue) !== JSON.stringify(queueRef.current);
     if (hasChange) {
+      if (isSupabaseConfigured) {
+        await updateRoomInDb({ queue: updatedQueue });
+      }
+      
       setQueue(updatedQueue);
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'queue_update',
-        payload: { queue: updatedQueue }
-      });
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'queue_update',
+          payload: { queue: updatedQueue }
+        });
+      }
     }
   };
 
@@ -1382,6 +1636,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   };
 
 
+
+  const displayUsers = isSupabaseConfigured
+    ? users.map(u => ({ ...u, isHost: u.clientId === dbHostClientId }))
+    : users;
 
   if (hasLoadedName && !username) {
     return (
@@ -1617,7 +1875,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         {/* LEFT COLUMN: Active Users (lg-col-span-3, order-3 on mobile, lg-order-1 on desktop) */}
         <aside className={`lg-col-span-3 min-h-0 flex flex-col gap-4 overflow-hidden room-left-column order-3 lg-order-1 ${isTheaterMode ? 'lg-hidden' : ''}`}>
           <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
-            <UsersList users={users} myClientId={clientIdRef.current} />
+            <UsersList users={displayUsers} myClientId={clientIdRef.current} />
           </div>
         </aside>
 
@@ -1631,7 +1889,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             >
               <YoutubePlayer
                 roomId={roomId}
-                videoId={currentVideo ? currentVideo.videoId : null}
+                videoId={currentVideo?.videoId || ""}
                 isPlaying={isPlaying}
                 seekTime={seekTime}
                 reactions={reactions}
