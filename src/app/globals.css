@@ -15,6 +15,9 @@
   --text-muted: #94a3b8;
   --text-dark: #475569;
   
+  --radial-gradient-1: rgba(139, 92, 246, 0.12);
+  --radial-gradient-2: rgba(6, 182, 212, 0.12);
+  
   --font-sans: var(--font-geist-sans), Arial, sans-serif;
   --font-mono: var(--font-geist-mono), monospace;
   
@@ -35,8 +38,8 @@ html, body {
   height: 100%;
   background-color: var(--bg-primary);
   background-image: 
-    radial-gradient(at 10% 20%, rgba(139, 92, 246, 0.12) 0px, transparent 50%),
-    radial-gradient(at 90% 80%, rgba(6, 182, 212, 0.12) 0px, transparent 50%);
+    radial-gradient(at 10% 20%, var(--radial-gradient-1) 0px, transparent 50%),
+    radial-gradient(at 90% 80%, var(--radial-gradient-2) 0px, transparent 50%);
   background-attachment: fixed;
   color: var(--text-main);
   font-family: var(--font-sans);
@@ -433,6 +436,7 @@ body > div {
   .lg-h-auto { height: auto; }
   .lg-max-h-none { max-height: none; }
   .lg-h-220 { height: 220px; }
+  .lg-hidden { display: none !important; }
 }
 
 @media (min-width: 640px) {
@@ -462,6 +466,9 @@ body.light {
   --text-main: #242429; /* Soft charcoal-brown text */
   --text-muted: #5e6470; /* Cool slate subtext */
   --text-dark: #8c93a0;
+  
+  --radial-gradient-1: rgba(109, 40, 217, 0.08);
+  --radial-gradient-2: rgba(8, 145, 178, 0.08);
   
   --shadow-main: 0 8px 32px 0 rgba(40, 40, 50, 0.05);
 }
@@ -596,6 +603,76 @@ body.light .w-7.h-7.text-white {
 /* System/playback control times */
 body.light .text-xs.text-muted.font-mono {
   color: var(--text-muted) !important;
+}
+
+/* =============================================================
+   THEME PALETTE OVERRIDES
+   ============================================================= */
+
+/* 1. Cyberpunk Neon Theme */
+body.cyberpunk {
+  --bg-primary: #0a0813;
+  --bg-secondary: rgba(255, 0, 127, 0.05);
+  --glass-bg: rgba(11, 8, 22, 0.75);
+  --glass-border: rgba(255, 0, 127, 0.2);
+  --glass-highlight: rgba(0, 240, 255, 0.05);
+  
+  --accent-primary: #ff007f;
+  --accent-primary-glow: rgba(255, 0, 127, 0.3);
+  --accent-secondary: #00f0ff;
+  --accent-secondary-glow: rgba(0, 240, 255, 0.3);
+  --accent-pink: #ff007f;
+  
+  --text-main: #f8fafc;
+  --text-muted: #ff007f;
+  --text-dark: #6366f1;
+  
+  --radial-gradient-1: rgba(255, 0, 127, 0.15);
+  --radial-gradient-2: rgba(0, 240, 255, 0.15);
+}
+
+/* 2. Forest Mint Theme */
+body.forest {
+  --bg-primary: #0a1410;
+  --bg-secondary: rgba(16, 185, 129, 0.05);
+  --glass-bg: rgba(10, 22, 17, 0.75);
+  --glass-border: rgba(16, 185, 129, 0.15);
+  --glass-highlight: rgba(52, 211, 153, 0.05);
+  
+  --accent-primary: #10b981;
+  --accent-primary-glow: rgba(16, 185, 129, 0.3);
+  --accent-secondary: #06b6d4;
+  --accent-secondary-glow: rgba(6, 182, 212, 0.3);
+  --accent-pink: #34d399;
+  
+  --text-main: #f0fdf4;
+  --text-muted: #a7f3d0;
+  --text-dark: #047857;
+  
+  --radial-gradient-1: rgba(16, 185, 129, 0.15);
+  --radial-gradient-2: rgba(6, 182, 212, 0.15);
+}
+
+/* 3. Ocean Abyss Theme */
+body.ocean {
+  --bg-primary: #050c1e;
+  --bg-secondary: rgba(59, 130, 246, 0.05);
+  --glass-bg: rgba(6, 14, 30, 0.75);
+  --glass-border: rgba(59, 130, 246, 0.15);
+  --glass-highlight: rgba(96, 165, 250, 0.05);
+  
+  --accent-primary: #2563eb;
+  --accent-primary-glow: rgba(37, 99, 235, 0.3);
+  --accent-secondary: #00f0ff;
+  --accent-secondary-glow: rgba(0, 240, 255, 0.3);
+  --accent-pink: #60a5fa;
+  
+  --text-main: #f0f9ff;
+  --text-muted: #93c5fd;
+  --text-dark: #1d4ed8;
+  
+  --radial-gradient-1: rgba(37, 99, 235, 0.15);
+  --radial-gradient-2: rgba(0, 240, 255, 0.15);
 }
 
 /* Emojis floating animation */
@@ -852,5 +929,114 @@ body.light .modal-card {
 }
 
 
+/* =============================================================
+   INTRO.JS CUSTOM THEME STYLING (GLASSMORPHISM & THEME SYNC)
+   ============================================================= */
+.introjs-tooltip {
+  background: var(--bg-primary) !important;
+  border: 1.5px solid var(--glass-border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(16px) !important;
+  min-width: 280px !important;
+  padding: 16px !important;
+}
 
+/* Tooltip text color */
+.introjs-tooltiptext {
+  color: var(--text-main) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 0.85rem !important;
+  line-height: 1.6 !important;
+}
 
+/* Header/bullet styles */
+.introjs-dontshowagain {
+  color: var(--text-muted) !important;
+  font-size: 0.75rem !important;
+  margin-top: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+.introjs-dontshowagain input {
+  cursor: pointer !important;
+}
+
+/* Navigation bullets */
+.introjs-bullets ul li a {
+  background: var(--text-muted) !important;
+  opacity: 0.3 !important;
+}
+.introjs-bullets ul li a.active {
+  background: var(--accent-primary) !important;
+  opacity: 1 !important;
+  box-shadow: 0 0 8px var(--accent-primary-glow) !important;
+}
+
+/* Introjs Arrow styling */
+.introjs-arrow {
+  border-color: transparent !important;
+}
+.introjs-arrow.top {
+  border-bottom-color: var(--bg-primary) !important;
+}
+.introjs-arrow.bottom {
+  border-top-color: var(--bg-primary) !important;
+}
+.introjs-arrow.left {
+  border-right-color: var(--bg-primary) !important;
+}
+.introjs-arrow.right {
+  border-left-color: var(--bg-primary) !important;
+}
+
+/* Close skip button */
+.introjs-skipbutton {
+  color: var(--text-muted) !important;
+  font-size: 16px !important;
+  font-weight: bold !important;
+  top: 8px !important;
+  right: 12px !important;
+  text-decoration: none !important;
+}
+.introjs-skipbutton:hover {
+  color: var(--text-main) !important;
+}
+
+/* Buttons (Quay lại, Tiếp tục) */
+.introjs-button {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--text-main) !important;
+  text-shadow: none !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  padding: 6px 14px !important;
+  transition: all 0.2s ease !important;
+  cursor: pointer !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.introjs-button:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: var(--accent-primary) !important;
+  color: var(--text-main) !important;
+}
+
+body.light .introjs-button:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+}
+
+.introjs-button:active {
+  transform: scale(0.97) !important;
+}
+
+.introjs-tooltipbuttons {
+  border-top: 1px solid var(--glass-border) !important;
+  margin-top: 14px !important;
+  padding-top: 10px !important;
+  text-align: right !important;
+}

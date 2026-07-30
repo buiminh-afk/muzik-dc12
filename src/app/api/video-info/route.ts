@@ -115,35 +115,113 @@ async function fetchVideoDuration(targetUrl: string): Promise<string> {
 }
 
 /**
- * Cạo (scrape) thông tin và danh sách video từ Playlist YouTube qua RSS Feed (XML)
- * Cách này cực kỳ ổn định, không bao giờ bị YouTube chặn captcha hay robot check!
+ * Cạo (scrape) thông tin và danh sách video từ Playlist YouTube
+ * Đầu tiên cố gắng cạo từ trang web HTML để lấy đầy đủ danh sách (lên đến 100 bài)
+ * Nếu lỗi hoặc không lấy được, rơi về phương thức RSS Feed (giới hạn 15 bài)
  */
 async function scrapePlaylist(playlistId: string) {
-  const url = `https://www.youtube.com/feeds/videos.xml?playlist_id=${playlistId}`;
-  
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-  let response;
+  // 1. Thử cạo trực tiếp từ trang playlist HTML
   try {
-    response = await fetch(url, {
+    const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}&hl=en`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
+
+    const response = await fetch(playlistUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
       },
       cache: 'no-store',
       signal: controller.signal
     });
     clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const html = await response.text();
+      
+      // Trích xuất ytInitialData
+      const jsonMatch = html.match(/ytInitialData\s*=\s*({[\s\S]*?});\s*<\/script>/)
+                     || html.match(/ytInitialData\s*=\s*({[\s\S]*?});/)
+                     || html.match(/window\["ytInitialData"\]\s*=\s*({[\s\S]*?});/);
+      
+      if (jsonMatch) {
+        const ytInitialData = JSON.parse(jsonMatch[1]);
+        
+        // Trích xuất tiêu đề playlist
+        let playlistTitle = 'Danh sách phát YouTube';
+        try {
+          playlistTitle = ytInitialData.metadata?.playlistMetadataRenderer?.title || 'Danh sách phát YouTube';
+        } catch (e) {}
+
+        // Hàm đệ quy tìm kiếm playlistVideoRenderer
+        const renderers: any[] = [];
+        const findRenderers = (obj: any) => {
+          if (!obj || typeof obj !== 'object') return;
+          if (obj.playlistVideoRenderer) {
+            renderers.push(obj.playlistVideoRenderer);
+          } else {
+            for (const key of Object.keys(obj)) {
+              findRenderers(obj[key]);
+            }
+          }
+        };
+
+        findRenderers(ytInitialData);
+
+        if (renderers.length > 0) {
+          const videos = renderers.map((r: any) => {
+            const videoId = r.videoId;
+            const title = r.title?.runs?.[0]?.text || r.title?.accessibility?.accessibilityData?.label || 'YouTube Video';
+            const thumbnail_url = r.thumbnail?.thumbnails?.[0]?.url || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+            const duration = r.lengthText?.simpleText || '';
+            return {
+              videoId,
+              title,
+              thumbnail_url,
+              duration
+            };
+          });
+
+          console.log(`Đã cạo thành công ${videos.length} bài hát từ playlist HTML.`);
+          return {
+            isPlaylist: true,
+            playlistTitle,
+            videos
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Lỗi khi cạo playlist HTML, đang thử rơi về RSS Feed:', err);
+  }
+
+  // 2. Dự phòng: cạo qua RSS Feed (chỉ lấy tối đa 15 bài đầu tiên)
+  console.log(`Đang chạy cơ chế dự phòng RSS Feed cho Playlist ID: ${playlistId}`);
+  const rssUrl = `https://www.youtube.com/feeds/videos.xml?playlist_id=${playlistId}`;
+  
+  const rssController = new AbortController();
+  const rssTimeoutId = setTimeout(() => rssController.abort(), 3500);
+
+  let rssResponse;
+  try {
+    rssResponse = await fetch(rssUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      cache: 'no-store',
+      signal: rssController.signal
+    });
+    clearTimeout(rssTimeoutId);
   } catch (error) {
-    clearTimeout(timeoutId);
+    clearTimeout(rssTimeoutId);
     throw new Error('Timeout or network error fetching playlist RSS');
   }
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch playlist RSS: status ${response.status}`);
+  if (!rssResponse.ok) {
+    throw new Error(`Failed to fetch playlist RSS: status ${rssResponse.status}`);
   }
 
-  const xml = await response.text();
+  const xml = await rssResponse.text();
   
   // Trích xuất tiêu đề playlist
   let playlistTitle = 'Danh sách phát YouTube';
@@ -187,7 +265,7 @@ async function scrapePlaylist(playlistId: string) {
   }
 
   if (videos.length === 0) {
-    throw new Error('No videos found in RSS feed');
+    throw new Error('No videos found in RSS/HTML playlist scraper');
   }
 
   return {

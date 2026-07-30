@@ -9,16 +9,12 @@ interface YoutubePlayerProps {
   isPlaying: boolean;
   seekTime: number | null;
   duration?: string;
-  playlistIdToLoad?: string | null;
-  isHost?: boolean;
-  reactions: { id: string, emoji: string }[];
+  reactions: { id: string; emoji: string; x: number }[];
   viewMode?: 'audio' | 'video';
   isWaitingForOthers?: boolean;
   waitingCount?: number;
   onPlayerStateChange: (state: 'PLAYING' | 'PAUSED', time: number) => void;
   onVideoEnded: () => void;
-  onLocalSeek: (time: number) => void;
-  onPlaylistLoaded: (videoIds: string[]) => void;
   onVideoTitleLoaded: (videoId: string, title: string) => void;
   onTimeUpdate?: (time: number) => void;
 }
@@ -31,35 +27,68 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-let apiLoaded = false;
-const loadYoutubeAPI = () => {
-  const win = window as any;
-  if (win.YT && win.YT.Player) {
+let youtubeApiPromise: Promise<any> | null = null;
+
+function loadYoutubeAPI(): Promise<any> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('YouTube API requires a browser'));
+  }
+
+  const win = window as Window & {
+    YT?: any;
+    onYouTubeIframeAPIReady?: () => void;
+  };
+
+  if (win.YT?.Player) {
     return Promise.resolve(win.YT);
   }
-  return new Promise<any>((resolve) => {
-    if (document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
-      const interval = setInterval(() => {
-        if (win.YT && win.YT.Player) {
-          clearInterval(interval);
-          resolve(win.YT);
-        }
-      }, 100);
-      return;
-    }
 
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    const firstScriptTag = document.getElementsByTagName('script')[0];
-    firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+  if (youtubeApiPromise) {
+    return youtubeApiPromise;
+  }
 
-    const previousOnReady = win.onYouTubeIframeAPIReady;
+  youtubeApiPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>(
+      'script[src="https://www.youtube.com/iframe_api"]'
+    );
+
+    const previousCallback = win.onYouTubeIframeAPIReady;
+
+    const timeout = window.setTimeout(() => {
+      youtubeApiPromise = null;
+      reject(new Error('Timed out loading YouTube IFrame API'));
+    }, 15000);
+
     win.onYouTubeIframeAPIReady = () => {
-      if (previousOnReady) previousOnReady();
+      window.clearTimeout(timeout);
+      previousCallback?.();
+
+      if (!win.YT?.Player) {
+        youtubeApiPromise = null;
+        reject(new Error('YouTube API loaded without YT.Player'));
+        return;
+      }
+
       resolve(win.YT);
     };
+
+    if (existingScript) return;
+
+    const script = document.createElement('script');
+    script.src = 'https://www.youtube.com/iframe_api';
+    script.async = true;
+
+    script.onerror = () => {
+      window.clearTimeout(timeout);
+      youtubeApiPromise = null;
+      reject(new Error('Failed to load YouTube IFrame API'));
+    };
+
+    document.head.appendChild(script);
   });
-};
+
+  return youtubeApiPromise;
+}
 
 export default function YoutubePlayer({
   roomId,
@@ -71,7 +100,9 @@ export default function YoutubePlayer({
   viewMode = 'video',
   isWaitingForOthers = false,
   waitingCount = 0,
+  onPlayerStateChange,
   onVideoEnded,
+  onVideoTitleLoaded,
   onTimeUpdate,
 }: YoutubePlayerProps) {
   const playerContainerId = `yt-player-${roomId}`;
@@ -83,6 +114,35 @@ export default function YoutubePlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [playerDuration, setPlayerDuration] = useState(0);
   const [fetchedDuration, setFetchedDuration] = useState<string | undefined>(undefined);
+  const endedTriggeredRef = useRef<string | null>(null);
+
+  // Reset ended trigger when videoId changes
+  useEffect(() => {
+    endedTriggeredRef.current = null;
+  }, [videoId]);
+
+  // Use refs to store changing props to avoid stale closures in player callbacks
+  const latestProps = useRef({
+    videoId,
+    isPlaying,
+    seekTime,
+    onPlayerStateChange,
+    onVideoEnded,
+    onVideoTitleLoaded,
+    onTimeUpdate,
+  });
+
+  useEffect(() => {
+    latestProps.current = {
+      videoId,
+      isPlaying,
+      seekTime,
+      onPlayerStateChange,
+      onVideoEnded,
+      onVideoTitleLoaded,
+      onTimeUpdate,
+    };
+  }, [videoId, isPlaying, seekTime, onPlayerStateChange, onVideoEnded, onVideoTitleLoaded, onTimeUpdate]);
 
   // Convert duration string (e.g., "03:45" or "01:15:30") to seconds
   const parseDurationToSeconds = (durationStr?: string): number => {
@@ -96,7 +156,7 @@ export default function YoutubePlayer({
     return 0;
   };
 
-  // Try to fetch duration lazily if it was missing (e.g. from a playlist)
+  // Try to fetch duration lazily if it was missing
   useEffect(() => {
     if (videoId && !duration) {
       fetch(`/api/video-info?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`)
@@ -120,60 +180,120 @@ export default function YoutubePlayer({
     if (!roomId) return;
 
     let player: any = null;
+    let cancelled = false;
 
-    loadYoutubeAPI().then((YT) => {
-      player = new YT.Player(playerContainerId, {
-        height: '100%',
-        width: '100%',
-        videoId: videoId || '',
-        host: 'https://www.youtube-nocookie.com',
-        playerVars: {
-          autoplay: isPlaying ? 1 : 0,
-          controls: 0,        // Hide native controls
-          disablekb: 1,       // Disable keyboard controls
-          fs: 0,              // Disable fullscreen button
-          rel: 0,             // Don't show related videos
-          showinfo: 0,
-          iv_load_policy: 3,
-        },
-        events: {
-          onReady: (event: any) => {
-            playerRef.current = event.target;
-            setPlayerReady(true);
-            event.target.setVolume(isMuted ? 0 : volume);
-            
-            if (videoId) {
-              if (initialSeekRef.current !== null) {
-                event.target.seekTo(initialSeekRef.current, true);
-                setCurrentTime(Math.floor(initialSeekRef.current));
-                initialSeekRef.current = null;
-              } else if (seekTime !== null && seekTime !== undefined) {
-                event.target.seekTo(seekTime, true);
-                setCurrentTime(Math.floor(seekTime));
+    loadYoutubeAPI()
+      .then((YT) => {
+        if (cancelled) return;
+
+        player = new YT.Player(playerContainerId, {
+          height: '100%',
+          width: '100%',
+          videoId: latestProps.current.videoId || '',
+          host: 'https://www.youtube-nocookie.com',
+          playerVars: {
+            autoplay: latestProps.current.isPlaying ? 1 : 0,
+            controls: 0,        // Hide native controls
+            disablekb: 1,       // Disable keyboard controls
+            fs: 0,              // Disable fullscreen button
+            rel: 0,             // Don't show related videos
+            showinfo: 0,
+            iv_load_policy: 3,
+            origin: typeof window !== 'undefined' ? window.location.origin : '',
+          },
+          events: {
+            onReady: (event: any) => {
+              if (cancelled) return;
+              playerRef.current = event.target;
+              setPlayerReady(true);
+              event.target.setVolume(isMuted ? 0 : volume);
+              
+              const currentVideoId = latestProps.current.videoId;
+              if (currentVideoId) {
+                const currentSeekTime = latestProps.current.seekTime;
+                if (initialSeekRef.current !== null) {
+                  event.target.seekTo(initialSeekRef.current, true);
+                  setCurrentTime(Math.floor(initialSeekRef.current));
+                  initialSeekRef.current = null;
+                } else if (currentSeekTime !== null && currentSeekTime !== undefined) {
+                  event.target.seekTo(currentSeekTime, true);
+                  setCurrentTime(Math.floor(currentSeekTime));
+                }
+
+                if (latestProps.current.isPlaying) {
+                  event.target.playVideo();
+                } else {
+                  event.target.pauseVideo();
+                }
+
+                // Trigger video title loading
+                if (typeof event.target.getVideoData === 'function') {
+                  const videoData = event.target.getVideoData();
+                  if (videoData && videoData.title) {
+                    latestProps.current.onVideoTitleLoaded(currentVideoId, videoData.title);
+                  }
+                }
               }
-              if (isPlaying) {
-                event.target.playVideo();
-              } else {
-                event.target.pauseVideo();
+            },
+            onStateChange: (event: any) => {
+              if (cancelled) return;
+              
+              const currentVideoId = latestProps.current.videoId;
+              const current = event.target.getCurrentTime?.() ?? 0;
+              
+              if (event.data === YT.PlayerState.PLAYING) {
+                setIsAutoplayBlocked(false);
+                latestProps.current.onPlayerStateChange('PLAYING', current);
+                
+                // Revert manual play if app state is paused
+                if (!latestProps.current.isPlaying) {
+                  event.target.pauseVideo();
+                }
+                
+                // Trigger title load if not loaded yet
+                if (currentVideoId && typeof event.target.getVideoData === 'function') {
+                  const videoData = event.target.getVideoData();
+                  if (videoData && videoData.title) {
+                    latestProps.current.onVideoTitleLoaded(currentVideoId, videoData.title);
+                  }
+                }
+              } else if (event.data === YT.PlayerState.PAUSED) {
+                latestProps.current.onPlayerStateChange('PAUSED', current);
+                
+                // Revert manual pause if app state is playing
+                if (latestProps.current.isPlaying) {
+                  event.target.playVideo();
+                  setIsAutoplayBlocked(true); // Autoplay might be blocked by browser
+                }
+              } else if (event.data === YT.PlayerState.ENDED) {
+                if (currentVideoId && endedTriggeredRef.current !== currentVideoId) {
+                  endedTriggeredRef.current = currentVideoId;
+                  latestProps.current.onVideoEnded();
+                }
               }
+            },
+            onAutoplayBlocked: () => {
+              if (cancelled) return;
+              setIsAutoplayBlocked(true);
+            },
+            onError: (errEvent: any) => {
+              console.error('YouTube player error:', errEvent.data);
             }
           },
-          onStateChange: (event: any) => {
-            // YT.PlayerState.ENDED = 0
-            if (event.data === 0) {
-              onVideoEnded();
-            }
-          },
-        },
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Failed to load YouTube API:', err);
+        }
       });
-    });
 
     return () => {
+      cancelled = true;
       if (player && typeof player.destroy === 'function') {
         player.destroy();
       }
       playerRef.current = null;
-      setPlayerReady(false);
     };
   }, [roomId]);
 
@@ -182,33 +302,27 @@ export default function YoutubePlayer({
     if (!playerReady || !playerRef.current) return;
     const player = playerRef.current;
 
-    if (videoId) {
-      // Extract current video ID from player to verify if it changed (with reliable fallback)
-      let currentVideoId = '';
-      if (player.getVideoData && typeof player.getVideoData === 'function') {
-        const data = player.getVideoData();
-        if (data && data.video_id) {
-          currentVideoId = data.video_id;
-        }
-      }
-      if (!currentVideoId && player.getVideoUrl) {
-        const currentVideoUrl = player.getVideoUrl();
-        currentVideoId = currentVideoUrl ? currentVideoUrl.split('v=')[1]?.split('&')[0] : '';
-      }
-
-      if (currentVideoId && currentVideoId !== videoId) {
-        player.loadVideoById({
-          videoId: videoId,
-          startSeconds: seekTime || 0,
-        });
-        if (isPlaying) {
-          player.playVideo();
-        } else {
-          player.pauseVideo();
-        }
-      }
-    } else {
+    if (!videoId) {
       player.stopVideo();
+      return;
+    }
+
+    const data = player.getVideoData?.();
+    const currentVideoId = data?.video_id ?? '';
+
+    if (currentVideoId !== videoId) {
+      const startSeconds = seekTime ?? 0;
+      if (isPlaying) {
+        player.loadVideoById({
+          videoId,
+          startSeconds,
+        });
+      } else {
+        player.cueVideoById({
+          videoId,
+          startSeconds,
+        });
+      }
     }
   }, [videoId, playerReady]);
 
@@ -244,32 +358,22 @@ export default function YoutubePlayer({
     playerRef.current.setVolume(isMuted ? 0 : volume);
   }, [volume, isMuted, playerReady]);
 
-  // Autoplay blocked detection
+  // Autoplay fallback check
   useEffect(() => {
-    if (!isPlaying || !playerReady || !playerRef.current || !videoId) {
-      setIsAutoplayBlocked(false);
-      return;
-    }
+    if (!playerReady || !isPlaying || !videoId) return;
 
-    const checkAutoplay = setInterval(() => {
-      const player = playerRef.current;
-      if (player && typeof player.getPlayerState === 'function') {
-        const state = player.getPlayerState();
-        // State 2 = PAUSED, 5 = CUED, -1 = UNSTARTED
-        // If it should be playing but remains stuck in these states, it's likely blocked by Chrome
-        if (state === 2 || state === 5 || state === -1) {
+    const checkTimeout = setTimeout(() => {
+      if (playerRef.current) {
+        const state = playerRef.current.getPlayerState?.();
+        // If state is not PLAYING (1) and not BUFFERING (3), show autoplay block overlay
+        if (state !== 1 && state !== 3) {
           setIsAutoplayBlocked(true);
-        } else if (state === 1 || state === 3) {
-          setIsAutoplayBlocked(false);
         }
       }
-    }, 2000);
+    }, 2500);
 
-    return () => clearInterval(checkAutoplay);
-  }, [isPlaying, playerReady, videoId]);
-
-  const onTimeUpdateRef = useRef(onTimeUpdate);
-  onTimeUpdateRef.current = onTimeUpdate;
+    return () => clearTimeout(checkTimeout);
+  }, [playerReady, isPlaying, videoId]);
 
   // Poll current time and trigger parent callback
   useEffect(() => {
@@ -280,12 +384,22 @@ export default function YoutubePlayer({
       if (player && typeof player.getCurrentTime === 'function') {
         const time = player.getCurrentTime();
         setCurrentTime(Math.floor(time));
-        onTimeUpdateRef.current?.(time);
+        latestProps.current.onTimeUpdate?.(time);
+
+        // Fallback: If time reaches near the end but YouTube's ENDED event didn't trigger
+        // (especially common in hidden iframe / Audio Only mode, or background tabs)
+        const dur = player.getDuration() || totalDurationSeconds;
+        if (dur > 0 && time >= dur - 1.5) {
+          if (endedTriggeredRef.current !== videoId) {
+            endedTriggeredRef.current = videoId;
+            latestProps.current.onVideoEnded();
+          }
+        }
       }
     }, 500);
 
     return () => clearInterval(interval);
-  }, [isPlaying, videoId, playerReady]);
+  }, [isPlaying, videoId, playerReady, totalDurationSeconds]);
 
   // Poll duration if missing
   useEffect(() => {
@@ -394,7 +508,7 @@ export default function YoutubePlayer({
             key={reaction.id}
             className="emoji-reaction"
             style={{
-              left: `${15 + Math.random() * 70}%`,
+              left: `${reaction.x}%`,
               bottom: '10%',
               zIndex: 30
             }}
@@ -465,7 +579,8 @@ export default function YoutubePlayer({
             <div className="flex items-end gap-1 h-12 mt-2 w-full justify-center max-w-sm px-4">
               {Array.from({ length: 24 }).map((_, i) => {
                 const delay = `${(i * 0.08).toFixed(2)}s`;
-                const duration = `${(0.5 + Math.random() * 0.8).toFixed(2)}s`;
+                const barHeight = 20 + ((i * 37) % 75);
+                const animationDuration = `${(0.5 + ((i * 13) % 8) / 10).toFixed(2)}s`;
                 return (
                   <div
                     key={i}
@@ -475,8 +590,8 @@ export default function YoutubePlayer({
                         : 'bg-neutral-800 h-1'
                     }`}
                     style={isPlaying ? {
-                      height: `${15 + Math.random() * 85}%`,
-                      animation: `equalize ${duration} ease-in-out ${delay} infinite alternate`
+                      height: `${barHeight}%`,
+                      animation: `equalize ${animationDuration} ease-in-out ${delay} infinite alternate`
                     } : {}}
                   />
                 );

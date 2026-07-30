@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getRealtimeChannel, isSupabaseConfigured } from '@/lib/supabase';
+import { getRealtimeChannel, isSupabaseConfigured, supabase } from '@/lib/supabase';
 import YoutubePlayer from './YoutubePlayer';
 import QueueList, { PlaylistItem } from './QueueList';
 import ChatBox, { ChatMessage } from './ChatBox';
 import UsersList, { RoomUser } from './UsersList';
 import SearchUI from './SearchUI';
-import { Music, Share2, LogOut, Disc, Sparkles, Headphones, ArrowRight, Sun, Moon, MonitorPlay, Heart, ThumbsUp, Flame, PartyPopper, RefreshCw, HelpCircle } from 'lucide-react';
+import { Music, Share2, LogOut, Disc, Sparkles, Headphones, ArrowRight, Sun, Moon, MonitorPlay, Heart, ThumbsUp, Flame, PartyPopper, RefreshCw, HelpCircle, Palette, Video, VideoOff } from 'lucide-react';
 import 'intro.js/introjs.css';
 
 interface RoomClientProps {
@@ -23,25 +23,25 @@ const AVATAR_COLORS = [
 export default function RoomClient({ roomId }: RoomClientProps) {
   const router = useRouter();
   
-  // State quản lý theme (light / dark)
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  // State quản lý theme
+  const [theme, setTheme] = useState<string>('dark');
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
+
+  const THEMES = ['dark', 'light', 'glassmorphism'];
 
   // Khôi phục theme từ localStorage
   useEffect(() => {
-    const savedTheme = localStorage.getItem('yt_together_theme') as 'dark' | 'light';
-    if (savedTheme) {
-      setTheme(savedTheme);
-      document.body.className = savedTheme;
-    } else {
-      document.body.className = 'dark';
-    }
+    const savedTheme = localStorage.getItem('yt_together_theme') || 'dark';
+    setTheme(savedTheme);
+    document.body.classList.remove('dark', 'light', 'glassmorphism');
+    document.body.classList.add(savedTheme);
   }, []);
 
-  const handleToggleTheme = () => {
-    const newTheme = theme === 'dark' ? 'light' : 'dark';
+  const handleSelectTheme = (newTheme: string) => {
     setTheme(newTheme);
     localStorage.setItem('yt_together_theme', newTheme);
-    document.body.className = newTheme;
+    document.body.classList.remove('dark', 'light', 'glassmorphism');
+    document.body.classList.add(newTheme);
   };
 
   // State quản lý kết nối & user
@@ -66,7 +66,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   
   // State nâng cấp UI/UX
   const [isTheaterMode, setIsTheaterMode] = useState(false);
-  const [reactions, setReactions] = useState<{ id: string, emoji: string }[]>([]);
+  const [isVideoHidden, setIsVideoHidden] = useState(false);
+  const [reactions, setReactions] = useState<{ id: string; emoji: string; x: number }[]>([]);
   const [toasts, setToasts] = useState<{ id: string, message: string }[]>([]);
   
   // Ref của realtime channel
@@ -77,11 +78,97 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   // Ref của player để lấy thời gian hiện tại khi phản hồi sync
   const playerTimeRef = useRef<number>(0);
+  const generateId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return Math.random().toString(36).substring(2, 15);
+  };
+
   const usersRef = useRef<RoomUser[]>([]);
   usersRef.current = users;
   const localRefIdRef = useRef<string | null>(null);
   localRefIdRef.current = localRefId;
   const playNextSongRef = useRef<() => void>(() => {});
+
+  const clientIdRef = useRef<string | null>(null);
+  if (!clientIdRef.current) {
+    clientIdRef.current = generateId();
+  }
+  const advancedItemIdRef = useRef<string | null>(null);
+  const finishedItemIdRef = useRef<string | null>(null);
+  const skipVotesRef = useRef<Set<string>>(new Set());
+  const skipVoteItemIdRef = useRef<string | null>(null);
+
+  // Helper hiển thị tin nhắn hệ thống
+  const addSystemMessage = (text: string, isError = false) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: generateId(),
+        username: 'Hệ thống',
+        text: text,
+        timestamp: new Date(),
+        isSystem: !isError,
+        isError: isError
+      }
+    ].slice(-500));
+  };
+
+  const showToast = (message: string) => {
+    const id = generateId();
+    setToasts(prev => [...prev, { id, message }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  };
+
+  const getCurrentUser = (activeUsers: RoomUser[]): RoomUser | undefined => {
+    let me = activeUsers.find(u => u.clientId === clientIdRef.current);
+    if (me) return me;
+    me = activeUsers.find(u => u.username === username && u.color === color);
+    if (me) return me;
+    me = activeUsers.find(u => u.presence_ref === localRefIdRef.current);
+    return me;
+  };
+
+  // Phát broadcast tin nhắn hệ thống (gửi đi và tự in ra màn hình của mình)
+  const broadcastSystemMessage = (text: string, isError = false) => {
+    if (!channelRef.current) return;
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'system_action',
+      payload: { text, isError }
+    });
+    addSystemMessage(text, isError);
+  };
+
+  // Gửi tin nhắn chat thông thường
+  const handleSendMessage = (text: string) => {
+    if (!channelRef.current) return;
+    
+    const messageId = generateId();
+    const msgPayload = {
+      id: messageId,
+      username: username,
+      text: text,
+      timestamp: new Date().toISOString()
+    };
+
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'chat_message',
+      payload: msgPayload
+    });
+
+    // Cập nhật local state cho chính người gửi (vì broadcast không phản hồi lại người gửi)
+    setMessages((prev) => [...prev, {
+      id: messageId,
+      username: username,
+      text: text,
+      timestamp: new Date()
+    }].slice(-500));
+  };
 
   // ===== PERSISTENCE: Lưu/phục hồi hàng đợi từ localStorage =====
   const storageKey = `yt_together_room_${roomId}`;
@@ -140,7 +227,67 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
   }, [roomId]);
 
-  // Thiết lập Supabase Realtime Connection
+  const processSkipVote = (
+    voterClientId: string,
+    voterUsername: string,
+    itemId: string
+  ) => {
+    const currentItem = queueRef.current[0];
+
+    if (!currentItem || currentItem.id !== itemId) {
+      return;
+    }
+
+    const currentUser = getCurrentUser(usersRef.current);
+
+    // Chỉ host điều phối việc đếm và skip.
+    if (!currentUser?.isHost) {
+      return;
+    }
+
+    // Bài mới thì reset toàn bộ phiếu cũ.
+    if (skipVoteItemIdRef.current !== itemId) {
+      skipVoteItemIdRef.current = itemId;
+      skipVotesRef.current.clear();
+    }
+
+    // Mỗi client chỉ được vote một lần.
+    if (skipVotesRef.current.has(voterClientId)) {
+      return;
+    }
+
+    skipVotesRef.current.add(voterClientId);
+
+    const activeUsers = usersRef.current.filter(user => user.clientId);
+    const totalUsers = Math.max(1, activeUsers.length);
+    const requiredVotes = Math.ceil(totalUsers * 0.6);
+    const voteCount = skipVotesRef.current.size;
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'system_action',
+      payload: {
+        text: `🗳️ ${voterUsername} đã biểu quyết bỏ qua bài hát (${voteCount}/${requiredVotes} phiếu).`,
+        isError: false
+      }
+    });
+
+    addSystemMessage(
+      `🗳️ ${voterUsername} đã biểu quyết bỏ qua bài hát (${voteCount}/${requiredVotes} phiếu).`
+    );
+
+    if (voteCount >= requiredVotes) {
+      skipVotesRef.current.clear();
+      skipVoteItemIdRef.current = null;
+
+      broadcastSystemMessage(
+        `⏭️ Đã đủ ${voteCount}/${requiredVotes} phiếu. Bỏ qua bài hiện tại.`
+      );
+
+      playNextSongRef.current();
+    }
+  };
+
   useEffect(() => {
     if (!username) return;
 
@@ -151,6 +298,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     lobbyChannelRef.current = lobby;
 
     let pingInterval: NodeJS.Timeout | null = null;
+    let syncTimeoutId: NodeJS.Timeout | null = null;
 
     lobby.subscribe((status: string) => {
       if (status === 'SUBSCRIBED') {
@@ -184,7 +332,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           username: payload.username,
           text: payload.text,
           timestamp: new Date(payload.timestamp)
-        }]);
+        }].slice(-500));
+      })
+      .on('broadcast', { event: 'vote_skip' }, ({ payload }: any) => {
+        if (!payload?.clientId || !payload?.username || !payload?.itemId) {
+          return;
+        }
+        processSkipVote(payload.clientId, payload.username, payload.itemId);
       })
       .on('broadcast', { event: 'system_action' }, ({ payload }: any) => {
         addSystemMessage(payload.text, payload.isError);
@@ -196,34 +350,32 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         setIsPlaying(payload.isPlaying);
         if (payload.seekTime !== undefined && payload.seekTime !== null) {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
-          setSeekTime(payload.seekTime + latency);
+          setSeekTime(payload.seekTime + (payload.isPlaying ? latency : 0));
           setTimeout(() => setSeekTime(null), 100);
         }
       })
       .on('broadcast', { event: 'emoji_reaction' }, ({ payload }: any) => {
-        setReactions(prev => [...prev, { id: payload.id, emoji: payload.emoji }]);
+        const x = 15 + Math.random() * 70;
+        setReactions(prev => [...prev, { id: payload.id, emoji: payload.emoji, x }]);
         setTimeout(() => {
           setReactions(prev => prev.filter(r => r.id !== payload.id));
         }, 2500);
       })
       .on('broadcast', { event: 'request_sync' }, ({ payload }: any) => {
-        // Chỉ cho phép đúng 1 người gửi thông tin sync (Host hoặc người join cũ nhất)
-        // để tránh tình trạng nhiều người cùng phản hồi gây loạn/nhảy timeline ở client mới.
+        if (payload.requesterId === clientIdRef.current) return;
         const activeUsers = usersRef.current;
         if (activeUsers.length === 0 || queueRef.current.length === 0) return;
 
         const host = activeUsers.find(u => u.isHost);
-        const myRefId = localRefIdRef.current;
 
         let shouldISync = false;
         if (host) {
-          shouldISync = host.presence_ref === myRefId;
+          shouldISync = host.clientId === clientIdRef.current;
         } else {
-          // Nếu không có host rõ ràng, người có thời gian tham gia sớm nhất sẽ làm nhiệm vụ sync
           const oldestUser = [...activeUsers].sort((a, b) => 
             new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
           )[0];
-          shouldISync = oldestUser?.presence_ref === myRefId;
+          shouldISync = oldestUser?.clientId === clientIdRef.current;
         }
 
         if (shouldISync) {
@@ -234,19 +386,21 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               queue: queueRef.current,
               isPlaying: isPlayingRef.current,
               currentTime: playerTimeRef.current,
-              targetRef: payload.requesterRef
+              targetClientId: payload.requesterId,
+              sentAt: Date.now()
             }
           });
         }
       })
       .on('broadcast', { event: 'sync_state' }, ({ payload }: any) => {
-        const myRefId = localRefIdRef.current;
-        const isMyTarget = !payload.targetRef || payload.targetRef === 'new_tab' || payload.targetRef === myRefId;
+        const isMyTarget = payload.targetClientId === clientIdRef.current;
         if (isMyTarget && payload.queue) {
           setQueue(payload.queue);
           setIsPlaying(payload.isPlaying);
-          if (payload.currentTime > 0) {
-            setSeekTime(payload.currentTime);
+          if (Number.isFinite(payload.currentTime)) {
+            const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
+            const targetTime = Math.max(0, payload.currentTime + (payload.isPlaying ? latency : 0));
+            setSeekTime(targetTime);
             setTimeout(() => setSeekTime(null), 100);
           }
           addSystemMessage(`🔄 Đã đồng bộ thành công với phòng.`);
@@ -267,7 +421,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             color: userPresence.color || '#00F0FF',
             joinedAt: userPresence.joinedAt,
             isHost: userPresence.isHost,
-            videoFinished: userPresence.videoFinished || false
+            videoFinished: userPresence.videoFinished || false,
+            finishedItemId: userPresence.finishedItemId || null,
+            votedToSkip: userPresence.votedToSkip || false,
+            clientId: userPresence.clientId
           });
         }
       });
@@ -275,41 +432,82 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       // Sắp xếp theo thời gian tham gia để xác định thứ tự
       onlineUsers.sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
 
-      // Dynamic Host Logic
-      const hasHost = onlineUsers.some(u => u.isHost);
+      // Dynamic Host Election
+      let canonicalHostRef: string | null = null;
+      const hostUsers = onlineUsers.filter(u => u.isHost);
+      if (hostUsers.length === 1) {
+        canonicalHostRef = hostUsers[0].presence_ref;
+      } else if (hostUsers.length > 1) {
+        const sortedHosts = [...hostUsers].sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
+        canonicalHostRef = sortedHosts[0].presence_ref;
+      } else if (onlineUsers.length > 0) {
+        canonicalHostRef = onlineUsers[0].presence_ref;
+      }
+
       const myRefId = localRefIdRef.current;
-      
-      if (!hasHost && onlineUsers.length > 0) {
-        const oldestUser = onlineUsers[0];
-        oldestUser.isHost = true;
-        
-        if (oldestUser.presence_ref === myRefId) {
+      const normalisedUsers = onlineUsers.map(u => ({
+        ...u,
+        isHost: u.presence_ref === canonicalHostRef
+      }));
+
+      // Bầu chủ phòng mới nếu mình được chọn
+      const myPresence = getCurrentUser(onlineUsers);
+      const isCanonicalHost = myPresence && myPresence.presence_ref === canonicalHostRef;
+
+      if (isCanonicalHost) {
+        if (myPresence && !myPresence.isHost) {
           channel.track({
+            clientId: clientIdRef.current,
             username,
             color,
-            joinedAt: oldestUser.joinedAt,
+            joinedAt: myPresence.joinedAt,
             isHost: true,
-            videoFinished: oldestUser.videoFinished || false
-          }).catch((err: any) => console.warn('Lobby track error:', err));
-          addSystemMessage('👑 Chủ phòng cũ đã rời đi. Bạn đã trở thành Chủ phòng mới!');
+            videoFinished: myPresence.videoFinished || false,
+            finishedItemId: myPresence.finishedItemId || null,
+            votedToSkip: myPresence.votedToSkip || false
+          }).catch((err: any) => console.warn('Track host update error:', err));
+          addSystemMessage('👑 Bạn đã trở thành Chủ phòng mới!');
         }
       }
 
-      setUsers(onlineUsers);
+      // Nhường chủ phòng nếu phát hiện người khác hợp lệ hơn
+      if (!isCanonicalHost) {
+        if (myPresence && myPresence.isHost) {
+          channel.track({
+            clientId: clientIdRef.current,
+            username,
+            color,
+            joinedAt: myPresence.joinedAt,
+            isHost: false,
+            videoFinished: myPresence.videoFinished || false,
+            finishedItemId: myPresence.finishedItemId || null,
+            votedToSkip: myPresence.votedToSkip || false
+          }).catch((err: any) => console.warn('Track host step down error:', err));
+        }
+      }
+
+      usersRef.current = normalisedUsers;
+      setUsers(normalisedUsers);
       
       const myRef = Object.keys(state).find(key => {
-        const p = state[key][0];
-        return p && p.username === username && p.color === color;
+        const list = state[key];
+        return list && list.some((p: any) => p.clientId === clientIdRef.current);
       });
       if (myRef) {
         setLocalRefId(myRef);
       }
 
       // Check if everyone is finished (Only Host coordinates this)
-      const isCurrentHost = onlineUsers.find(u => u.presence_ref === myRefId)?.isHost;
-      if (isCurrentHost && onlineUsers.length > 0) {
-        const allFinished = onlineUsers.every(u => u.videoFinished);
-        if (allFinished) {
+      const isCurrentHost = normalisedUsers.find(u => u.clientId === clientIdRef.current)?.isHost;
+      if (isCurrentHost && normalisedUsers.length > 0) {
+        const currentVideo = queueRef.current.length > 0 ? queueRef.current[0] : null;
+        const currentItemId = currentVideo ? currentVideo.id : null;
+        
+        // Everyone must have finished the CURRENT active song item ID
+        const allFinished = currentItemId && normalisedUsers.every(u => u.finishedItemId === currentItemId);
+
+        if (allFinished && currentItemId && advancedItemIdRef.current !== currentItemId) {
+          advancedItemIdRef.current = currentItemId;
           playNextSongRef.current();
         }
       }
@@ -325,21 +523,23 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       switch (status) {
         case 'SUBSCRIBED': {
           console.log('Realtime connected');
-          const isFirst = users.length === 0;
+          const isFirst = usersRef.current.length === 0;
           channel.track({
+            clientId: clientIdRef.current,
             username,
             color,
             joinedAt: new Date().toISOString(),
             isHost: isFirst,
-            videoFinished: false
+            videoFinished: false,
+            finishedItemId: null,
+            votedToSkip: false
           });
 
-          setTimeout(() => {
-            const myRefId = localRefIdRef.current;
+          syncTimeoutId = setTimeout(() => {
             channel.send({
               type: 'broadcast',
               event: 'request_sync',
-              payload: { requesterRef: myRefId || 'new_tab' }
+              payload: { requesterId: clientIdRef.current }
             });
           }, 1000);
           break;
@@ -365,8 +565,15 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (pingInterval) {
         clearInterval(pingInterval);
       }
+      if (syncTimeoutId) {
+        clearTimeout(syncTimeoutId);
+      }
       lobby.unsubscribe();
       channel.unsubscribe();
+      if (isSupabaseConfigured && supabase) {
+        supabase.removeChannel(channel);
+        supabase.removeChannel(lobby);
+      }
     };
   }, [username, color, roomId]);
 
@@ -400,83 +607,25 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   // Reset videoFinished status when the current video changes
   const currentVideo = queue.length > 0 ? queue[0] : null;
-  const currentVideoId = currentVideo ? currentVideo.videoId : null;
+  const currentItemId = currentVideo ? currentVideo.id : null;
   useEffect(() => {
     if (!channelRef.current || !username) return;
-    const myRefId = localRefIdRef.current;
-    if (!myRefId) return;
     
-    const me = usersRef.current.find(u => u.presence_ref === myRefId);
+    const me = getCurrentUser(usersRef.current);
+    
     channelRef.current.track({
+      clientId: clientIdRef.current,
       username,
       color,
       joinedAt: me ? me.joinedAt : new Date().toISOString(),
-      isHost: me ? me.isHost : false,
-      videoFinished: false
+      isHost: me ? me.isHost || false : false,
+      videoFinished: false,
+      finishedItemId: null,
+      votedToSkip: false
     }).catch((err: any) => console.warn('Track reset error:', err));
-  }, [currentVideoId, username]);
+  }, [currentItemId, username]);
 
-  // Gửi tin nhắn chat thông thường
-  const handleSendMessage = (text: string) => {
-    if (!channelRef.current) return;
-    
-    const messageId = Math.random().toString(36).substring(2, 9);
-    const msgPayload = {
-      id: messageId,
-      username: username,
-      text: text,
-      timestamp: new Date().toISOString()
-    };
 
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'chat_message',
-      payload: msgPayload
-    });
-
-    // Cập nhật local state cho chính người gửi (vì broadcast không phản hồi lại người gửi)
-    setMessages((prev) => [...prev, {
-      id: messageId,
-      username: username,
-      text: text,
-      timestamp: new Date()
-    }]);
-  };
-
-  // Helper hiển thị tin nhắn hệ thống
-  const addSystemMessage = (text: string, isError = false) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Math.random().toString(36).substring(2, 9),
-        username: 'Hệ thống',
-        text: text,
-        timestamp: new Date(),
-        isSystem: !isError,
-        isError: isError
-      }
-    ]);
-  };
-
-  const showToast = (message: string) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts(prev => [...prev, { id, message }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3000);
-  };
-
-  // Phát broadcast tin nhắn hệ thống (gửi đi và tự in ra màn hình của mình)
-  const broadcastSystemMessage = (text: string, isError = false) => {
-    if (!channelRef.current) return;
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'system_action',
-      payload: { text, isError }
-    });
-    // Tự cập nhật local
-    addSystemMessage(text, isError);
-  };
 
   // XỬ LÝ LỆNH CHAT COMMANDS
   const handleCommand = async (cmd: string, args: string) => {
@@ -509,11 +658,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               const data = await response.json();
               if (data.isPlaylist && data.videos && data.videos.length > 0) {
                 const newItems: PlaylistItem[] = data.videos.map((vid: any) => ({
-                  id: Math.random().toString(36).substring(2, 9),
+                  id: generateId(),
                   videoId: vid.videoId,
                   title: vid.title,
                   thumbnail: vid.thumbnail_url,
-                  addedBy: username
+                  addedBy: username,
+                  duration: vid.duration
                 }));
 
                 const newQueue = [...queueRef.current, ...newItems];
@@ -581,7 +731,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         }
 
         const newItem: PlaylistItem = {
-          id: Math.random().toString(36).substring(2, 9),
+          id: generateId(),
           videoId: videoId!,
           title,
           thumbnail,
@@ -650,48 +800,86 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         break;
       }
 
+      case 'voteskip':
+      case 'vs': {
+        const currentItem = queueRef.current[0];
+
+        if (!currentItem) {
+          addSystemMessage('Hàng đợi đang trống, không thể bỏ phiếu qua bài.', true);
+          return;
+        }
+
+        const myClientId = clientIdRef.current;
+        if (!myClientId) {
+          addSystemMessage('Không xác định được phiên người dùng. Hãy tải lại trang.', true);
+          return;
+        }
+
+        const me = getCurrentUser(usersRef.current);
+        if (me && me.votedToSkip) {
+          addSystemMessage('⚠️ Bạn đã biểu quyết bỏ qua bài hát này rồi.', true);
+          return;
+        }
+
+        // Cập nhật Presence local cho giao diện UsersList hiển thị checkmark
+        channelRef.current.track({
+          clientId: clientIdRef.current,
+          username,
+          color,
+          joinedAt: me ? me.joinedAt : new Date().toISOString(),
+          isHost: me ? me.isHost || false : false,
+          videoFinished: me ? me.videoFinished || false : false,
+          finishedItemId: me ? me.finishedItemId || null : null,
+          votedToSkip: true
+        }).catch((err: any) => console.warn('Track votedToSkip error:', err));
+
+        /*
+         * Gửi vote cho các client khác.
+         * Host sẽ là coordinator và quyết định khi nào skip.
+         */
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'vote_skip',
+          payload: {
+            clientId: myClientId,
+            username,
+            itemId: currentItem.id
+          }
+        });
+
+        /*
+         * Supabase broadcast thường không echo lại sender.
+         * Nếu chính người vote là host thì phải xử lý local.
+         */
+        const isSelfHost = usersRef.current.some(
+          user => user.clientId === myClientId && user.isHost
+        );
+
+        if (isSelfHost) {
+          processSkipVote(myClientId, username, currentItem.id);
+        } else {
+          addSystemMessage('🗳️ Đã gửi phiếu bỏ qua bài hát.');
+        }
+        break;
+      }
+
       case 'skip':
       case 'next': {
         if (!isCurrentHost) {
-          addSystemMessage('❌ Chỉ Chủ phòng mới có quyền chuyển bài.', true);
+          addSystemMessage('❌ Chỉ Chủ phòng mới có quyền bỏ qua bài hát ngay lập tức.', true);
           return;
         }
-        if (queueRef.current.length <= 1) {
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'queue_update',
-            payload: { queue: [] }
-          });
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'playback_state',
-            payload: { isPlaying: false, seekTime: 0 }
-          });
-          // Cập nhật local state
-          setQueue([]);
-          setIsPlaying(false);
-          setSeekTime(0);
-          setTimeout(() => setSeekTime(null), 100);
-          broadcastSystemMessage(`⏭️ ${username} đã bỏ qua bài hát cuối cùng.`);
-        } else {
-          const newQueue = queueRef.current.slice(1);
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'queue_update',
-            payload: { queue: newQueue }
-          });
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'playback_state',
-            payload: { isPlaying: true, seekTime: 0 }
-          });
-          // Cập nhật local state
-          setQueue(newQueue);
-          setIsPlaying(true);
-          setSeekTime(0);
-          setTimeout(() => setSeekTime(null), 100);
-          broadcastSystemMessage(`⏭️ ${username} đã bỏ qua bài hát. Bài tiếp theo: "${newQueue[0].title}"`);
+
+        if (queueRef.current.length === 0) {
+          addSystemMessage('Hàng đợi đang trống, không thể bỏ qua bài.', true);
+          return;
         }
+
+        skipVotesRef.current.clear();
+        skipVoteItemIdRef.current = null;
+
+        broadcastSystemMessage(`⏭️ ${username} đã bỏ qua bài hát hiện tại.`);
+        playNextSongRef.current();
         break;
       }
 
@@ -733,20 +921,35 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         break;
       }
 
+      case 'help':
+      case 'h': {
+        const helpMsg = `Danh sách các lệnh hỗ trợ:
+📌 /play <link hoặc từ khóa> (hoặc /p) - Thêm nhạc vào hàng đợi.
+⏸️ /pause - Tạm dừng nhạc (Chủ phòng).
+▶️ /resume (hoặc /unpause) - Tiếp tục phát nhạc (Chủ phòng).
+⏭️ /skip (hoặc /next) - Bỏ qua bài hát hiện tại (Chủ phòng).
+🗑️ /clear - Xóa sạch hàng đợi (Chủ phòng).
+📋 /queue (hoặc /q) - Xem danh sách hàng chờ.
+ℹ️ /help (hoặc /h) - Hiển thị hướng dẫn này.`;
+        addSystemMessage(helpMsg);
+        break;
+      }
+
       default: {
         addSystemMessage(`Lỗi: Không tìm thấy lệnh /${cmd}. Gõ "/help" để xem các lệnh hỗ trợ.`, true);
       }
     }
   };
 
-  const handleAddVideo = (videoId: string, title: string, thumbnail: string) => {
+  const handleAddVideo = (video: { videoId: string; title: string; thumbnailUrl: string; duration?: string }) => {
     if (!channelRef.current) return;
     const newItem: PlaylistItem = {
-      id: Math.random().toString(36).substring(2, 9),
-      videoId,
-      title,
-      thumbnail,
+      id: generateId(),
+      videoId: video.videoId,
+      title: video.title,
+      thumbnail: video.thumbnailUrl,
       addedBy: username,
+      duration: video.duration,
     };
     const newQueue = [...queueRef.current, newItem];
     channelRef.current.send({
@@ -755,7 +958,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       payload: { queue: newQueue }
     });
     setQueue(newQueue);
-    broadcastSystemMessage(`🎵 ${username} đã thêm bài hát: "${title}" vào hàng đợi.`);
+    broadcastSystemMessage(`🎵 ${username} đã thêm bài hát: "${video.title}" vào hàng đợi.`);
     showToast(`${username} vừa thêm 1 bài hát`);
 
     if (newQueue.length === 1) {
@@ -772,13 +975,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const sendReaction = (emoji: string) => {
     if (!channelRef.current) return;
-    const id = Math.random().toString(36).substring(2, 9);
+    const id = generateId();
     channelRef.current.send({
       type: 'broadcast',
       event: 'emoji_reaction',
       payload: { id, emoji }
     });
-    setReactions(prev => [...prev, { id, emoji }]);
+    const x = 15 + Math.random() * 70;
+    setReactions(prev => [...prev, { id, emoji, x }]);
     setTimeout(() => {
       setReactions(prev => prev.filter(r => r.id !== id));
     }, 2500);
@@ -787,15 +991,40 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const handleManualSync = () => {
     if (!channelRef.current) return;
     
-    const myRefId = localRefId;
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'request_sync',
-      payload: { requesterRef: myRefId || 'new_tab' }
-    });
+    const activeUsers = usersRef.current;
+    const host = activeUsers.find(u => u.isHost);
     
-    addSystemMessage('🔄 Đang gửi yêu cầu đồng bộ lại với chủ phòng...');
-    showToast('🔄 Đang đồng bộ lại nhạc...');
+    let amIHost = false;
+    if (host) {
+      amIHost = host.clientId === clientIdRef.current;
+    } else if (activeUsers.length > 0) {
+      const oldestUser = [...activeUsers].sort((a, b) => 
+        new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+      )[0];
+      amIHost = oldestUser?.clientId === clientIdRef.current;
+    }
+
+    if (amIHost) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'sync_state',
+        payload: {
+          queue: queueRef.current,
+          isPlaying: isPlayingRef.current,
+          currentTime: playerTimeRef.current,
+          targetRef: 'new_tab'
+        }
+      });
+      showToast('🔄 Đã phát đồng bộ nhạc cho toàn phòng...');
+    } else {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'request_sync',
+        payload: { requesterRef: localRefIdRef.current || 'new_tab' }
+      });
+      addSystemMessage('🔄 Đang gửi yêu cầu đồng bộ lại với chủ phòng...');
+      showToast('🔄 Đang đồng bộ lại nhạc...');
+    }
   };
 
   const handleStartTour = () => {
@@ -834,8 +1063,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               position: 'left'
             }
           ],
-          nextLabel: 'Tiếp tục &rarr;',
-          prevLabel: '&larr; Quay lại',
+          nextLabel: 'Tiếp tục →',
+          prevLabel: '← Quay lại',
           doneLabel: 'Hoàn tất',
           dontShowAgain: true
         })
@@ -865,20 +1094,41 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     // bởi useEffect lắng nghe isPlaying trong YoutubePlayer.tsx
   };
 
+  const handleTimeUpdate = (time: number) => {
+    playerTimeRef.current = time;
+  };
+
   const handleVideoEnded = () => {
     if (!channelRef.current) return;
     
     // Đánh dấu bản thân đã xem xong bài
-    const myRefId = localRefIdRef.current;
-    const me = usersRef.current.find(u => u.presence_ref === myRefId);
+    const me = getCurrentUser(usersRef.current);
     
+    const currentVideo = queueRef.current.length > 0 ? queueRef.current[0] : null;
+    const currentItemId = currentVideo ? currentVideo.id : null;
+    if (!currentItemId) return;
+
+    // Tránh gửi lặp cho cùng một bài hát
+    if (finishedItemIdRef.current === currentItemId) return;
+    finishedItemIdRef.current = currentItemId;
+
+    // Nếu chỉ có 1 mình trong phòng (hoặc chưa có ai đồng bộ), tự động next luôn không cần qua server sync
+    const activeUsers = usersRef.current;
+    if (activeUsers.length <= 1) {
+      playNextSongRef.current();
+      return;
+    }
+
     channelRef.current.track({
+      clientId: clientIdRef.current,
       username,
       color,
       joinedAt: me ? me.joinedAt : new Date().toISOString(),
-      isHost: me ? me.isHost : false,
-      videoFinished: true
-    }).catch((err: any) => console.warn('Track videoFinished error:', err));
+      isHost: me ? me.isHost || false : false,
+      videoFinished: true,
+      finishedItemId: currentItemId,
+      votedToSkip: me ? me.votedToSkip || false : false
+    }).catch((err: any) => console.warn('Track finishedItemId error:', err));
     
     addSystemMessage('⌛ Bạn đã nghe xong. Đang đợi các thành viên khác...');
     showToast('⌛ Đang đợi các thành viên khác...');
@@ -886,6 +1136,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const playNextSong = () => {
     if (!channelRef.current) return;
+    
+    skipVotesRef.current.clear();
+    skipVoteItemIdRef.current = null;
     
     if (queueRef.current.length > 1) {
       const newQueue = queueRef.current.slice(1);
@@ -932,7 +1185,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handleLocalSeek = (time: number) => {
     if (!channelRef.current) return;
-    const isCurrentHost = usersRef.current.find(u => u.presence_ref === localRefIdRef.current)?.isHost;
+    const isCurrentHost = usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
     if (!isCurrentHost) return;
     
     playerTimeRef.current = time;
@@ -954,7 +1207,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     if (itemIndex === -1) return;
 
     const removedItem = queueRef.current[itemIndex];
-    const isCurrentHost = usersRef.current.find(u => u.presence_ref === localRefIdRef.current)?.isHost;
+    const isCurrentHost = usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
     const isOwner = removedItem.addedBy === username;
 
     if (!isCurrentHost && !isOwner) {
@@ -991,11 +1244,18 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
   };
 
-  const handlePlayIndex = (index: number) => {
-    if (!channelRef.current || index < 0 || index >= queue.length) return;
+  const handlePlayItem = (itemId: string) => {
+    if (!channelRef.current) return;
 
-    const targetItem = queue[index];
-    const remainingItems = queue.filter((_, i) => i !== index);
+    // Check host status
+    const isCurrentHost = usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
+    if (!isCurrentHost) return;
+
+    const index = queueRef.current.findIndex(item => item.id === itemId);
+    if (index === -1) return;
+
+    const targetItem = queueRef.current[index];
+    const remainingItems = queueRef.current.filter(item => item.id !== itemId);
     const newQueue = [targetItem, ...remainingItems];
 
     channelRef.current.send({
@@ -1018,8 +1278,15 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     broadcastSystemMessage(`🎵 ${username} đã phát trực tiếp bài hát: "${targetItem.title}"`);
   };
 
-  const handleMoveToTop = (index: number) => {
-    if (!channelRef.current || index <= 1 || index >= queueRef.current.length) return;
+  const handleMoveNext = (itemId: string) => {
+    if (!channelRef.current) return;
+
+    // Check host status
+    const isCurrentHost = usersRef.current.find(u => u.clientId === clientIdRef.current)?.isHost;
+    if (!isCurrentHost) return;
+
+    const index = queueRef.current.findIndex(item => item.id === itemId);
+    if (index === -1 || index <= 1) return;
 
     const selectedItem = queueRef.current[index];
     if (!selectedItem) return;
@@ -1048,7 +1315,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     if (!videoIds || videoIds.length === 0) return;
 
     const newItems: PlaylistItem[] = videoIds.map((id) => ({
-      id: Math.random().toString(36).substring(2, 9),
+      id: generateId(),
       videoId: id,
       title: `YouTube Video (${id})`,
       thumbnail: `https://img.youtube.com/vi/${id}/hqdefault.jpg`,
@@ -1209,15 +1476,78 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         </div>
 
         <div className="flex items-center w-full sm-w-auto justify-end room-nav-buttons" style={{ gap: '12px' }}>
-          <button
-            onClick={handleToggleTheme}
-            className="glass-btn glass-btn-secondary text-xs flex items-center justify-center"
-            style={{ cursor: 'pointer', width: '32px', height: '32px', padding: 0 }}
-            title={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
-            aria-label="Đổi giao diện"
-          >
-            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-          </button>
+          {/* Nút Chọn Theme dạng Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setShowThemeMenu(!showThemeMenu)}
+              className="glass-btn glass-btn-secondary text-xs flex items-center justify-center gap-1.5"
+              style={{ cursor: 'pointer', height: '32px', padding: '0 10px' }}
+              title="Chọn chủ đề"
+              aria-label="Chọn chủ đề"
+            >
+              <Palette size={14} className="text-purple-400" />
+              <span className="hidden md:inline text-xs font-semibold">Chủ đề</span>
+            </button>
+
+            {showThemeMenu && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setShowThemeMenu(false)}
+                />
+                
+                <div 
+                  className="absolute right-0 mt-2 w-48 rounded-xl border z-50 p-2 flex flex-col gap-1 shadow-2xl animate-fade-in"
+                  style={{
+                    backgroundColor: 'var(--glass-bg)',
+                    backdropFilter: 'blur(16px)',
+                    borderColor: 'var(--glass-border)',
+                  }}
+                >
+                  <div className="px-2.5 py-1 text-[10px] font-bold text-muted uppercase tracking-wider">
+                    Chọn chủ đề
+                  </div>
+                  {[
+                    { id: 'dark', label: 'Tối Neon', desc: 'Sắc tím huyền ảo', colors: ['#8b5cf6', '#06b6d4'] },
+                    { id: 'light', label: 'Kem Sáng', desc: 'Ấm áp & dịu mắt', colors: ['#f6f5f0', '#be185d'] },
+                    { id: 'cyberpunk', label: 'Cyberpunk', desc: 'Neon cá tính', colors: ['#ff007f', '#00f0ff'] },
+                    { id: 'forest', label: 'Mint Rừng', desc: 'Xanh thanh mát', colors: ['#10b981', '#34d399'] },
+                    { id: 'ocean', label: 'Đại Dương', desc: 'Biển sâu cuốn hút', colors: ['#2563eb', '#60a5fa'] }
+                  ].map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        handleSelectTheme(t.id);
+                        setShowThemeMenu(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left transition-all duration-200 hover:bg-white-05 active:scale-98"
+                      style={{
+                        cursor: 'pointer',
+                        background: theme === t.id ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                        border: 'none',
+                        color: 'inherit'
+                      }}
+                    >
+                      <div 
+                        className="w-4 h-4 rounded-full border border-white-20 shrink-0" 
+                        style={{
+                          background: `linear-gradient(135deg, ${t.colors[0]} 0%, ${t.colors[1]} 100%)`
+                        }}
+                      />
+                      <div className="flex flex-col min-w-0">
+                        <span className={`text-xs font-semibold ${theme === t.id ? 'text-purple-400' : 'text-main'}`}>
+                          {t.label}
+                        </span>
+                        <span className="text-[10px] text-muted truncate">
+                          {t.desc}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
 
           <button
             onClick={handleManualSync}
@@ -1237,6 +1567,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             aria-label="Chế độ rạp hát"
           >
             <MonitorPlay size={14} />
+          </button>
+
+          <button
+            onClick={() => setIsVideoHidden(!isVideoHidden)}
+            className="glass-btn glass-btn-secondary text-xs flex items-center justify-center"
+            style={{ cursor: 'pointer', width: '32px', height: '32px', padding: 0 }}
+            title={isVideoHidden ? "Hiện video" : "Ẩn video"}
+            aria-label={isVideoHidden ? "Hiện video" : "Ẩn video"}
+          >
+            {isVideoHidden ? <VideoOff size={14} className="text-rose-400" /> : <Video size={14} />}
           </button>
 
           <button
@@ -1277,7 +1617,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         {/* LEFT COLUMN: Active Users (lg-col-span-3, order-3 on mobile, lg-order-1 on desktop) */}
         <aside className={`lg-col-span-3 min-h-0 flex flex-col gap-4 overflow-hidden room-left-column order-3 lg-order-1 ${isTheaterMode ? 'lg-hidden' : ''}`}>
           <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
-            <UsersList users={users} localRefId={localRefId} />
+            <UsersList users={users} myClientId={clientIdRef.current} />
           </div>
         </aside>
 
@@ -1286,7 +1626,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           {/* Video Player */}
           <div className="glass-card p-4 shrink-0 overflow-hidden relative">
             <div 
-              className="shrink-0 overflow-hidden"
+              className="shrink-0 overflow-hidden relative"
               style={{ height: isTheaterMode ? 'clamp(300px, 60vh, 600px)' : 'clamp(200px, 42vh, 480px)', transition: 'height 0.3s' }}
             >
               <YoutubePlayer
@@ -1294,15 +1634,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
                 videoId={currentVideo ? currentVideo.videoId : null}
                 isPlaying={isPlaying}
                 seekTime={seekTime}
-                playlistIdToLoad={playlistIdToLoad}
-                isHost={isCurrentHost}
                 reactions={reactions}
-                isWaitingForOthers={users.find(u => u.presence_ref === localRefId)?.videoFinished || false}
+                viewMode={isVideoHidden ? 'audio' : 'video'}
+                isWaitingForOthers={users.find(u => u.clientId === clientIdRef.current)?.videoFinished || false}
                 waitingCount={users.filter(u => !u.videoFinished).length}
                 onPlayerStateChange={handlePlayerStateChange}
+                onTimeUpdate={handleTimeUpdate}
                 onVideoEnded={handleVideoEnded}
-                onLocalSeek={handleLocalSeek}
-                onPlaylistLoaded={handlePlaylistLoaded}
                 onVideoTitleLoaded={handleVideoTitleLoaded}
               />
             </div>
@@ -1312,12 +1650,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           <div className="glass-card p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
             <QueueList
               queue={queue}
+              currentItemId={currentVideo ? currentVideo.id : null}
               isPlaying={isPlaying}
               username={username}
               isHost={!!isCurrentHost}
               onRemoveItem={handleRemoveItem}
-              onPlayIndex={handlePlayIndex}
-              onMoveToTop={handleMoveToTop}
+              onPlayItem={handlePlayItem}
+              onMoveNext={handleMoveNext}
             />
           </div>
         </main>

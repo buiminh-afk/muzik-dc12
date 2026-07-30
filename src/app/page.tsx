@@ -32,6 +32,14 @@ export default function Home() {
     const savedName = localStorage.getItem('yt_together_username');
     if (savedName) setUsername(savedName);
 
+    // Khôi phục theme từ localStorage
+    const savedTheme = localStorage.getItem('yt_together_theme');
+    if (savedTheme) {
+      document.body.className = savedTheme;
+    } else {
+      document.body.className = 'dark';
+    }
+
     // Khởi tạo kết nối Sảnh (Lobby)
     const channel = getRealtimeChannel('lobby');
     channelRef.current = channel;

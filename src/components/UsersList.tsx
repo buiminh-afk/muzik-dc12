@@ -1,6 +1,6 @@
 'use client';
 
-import { Users, Shield } from 'lucide-react';
+import { Users, Shield, FastForward } from 'lucide-react';
 
 export interface RoomUser {
   presence_ref: string;
@@ -9,14 +9,17 @@ export interface RoomUser {
   joinedAt: string;
   isHost?: boolean;
   videoFinished?: boolean;
+  finishedItemId?: string | null;
+  votedToSkip?: boolean;
+  clientId?: string;
 }
 
 interface UsersListProps {
   users: RoomUser[];
-  localRefId: string | null;
+  myClientId: string;
 }
 
-export default function UsersList({ users, localRefId }: UsersListProps) {
+export default function UsersList({ users, myClientId }: UsersListProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-3">
@@ -30,7 +33,7 @@ export default function UsersList({ users, localRefId }: UsersListProps) {
         className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2 scrollbar-thin"
       >
         {users.map((user) => {
-          const isMe = user.presence_ref === localRefId;
+          const isMe = user.clientId === myClientId;
           const firstLetter = user.username.charAt(0).toUpperCase();
 
           return (
@@ -78,6 +81,14 @@ export default function UsersList({ users, localRefId }: UsersListProps) {
                     title="Chủ phòng"
                   >
                     <Shield size={12} fill="currentColor" style={{ opacity: 0.8 }} />
+                  </span>
+                )}
+                {user.votedToSkip && (
+                  <span
+                    className="text-yellow-400 flex items-center"
+                    title="Đã bỏ phiếu skip"
+                  >
+                    <FastForward size={12} fill="currentColor" style={{ opacity: 0.8 }} />
                   </span>
                 )}
               </div>
