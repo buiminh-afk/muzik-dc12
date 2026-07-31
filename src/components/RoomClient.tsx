@@ -51,7 +51,107 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [color, setColor] = useState('#00F0FF');
   const [localRefId, setLocalRefId] = useState<string | null>(null);
   const [users, setUsers] = useState<RoomUser[]>([]);
-  const [dbHostClientId, setDbHostClientId] = useState<string | null>(null);
+  const [dbHostClientId, _setDbHostClientId] = useState<string | null>(null);
+  const dbHostClientIdRef = useRef<string | null>(null);
+
+  const setDbHostClientId = (id: string | null) => {
+    dbHostClientIdRef.current = id;
+    _setDbHostClientId(id);
+  };
+
+  // State xác thực mật khẩu
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'requires_password'>('checking');
+  const [roomPasswordHash, setRoomPasswordHash] = useState<string | null>(null);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+
+  // Hash đơn giản cho password (giống bên page.tsx)
+  const simpleHash = (str: string) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash;
+    }
+    return hash.toString();
+  };
+
+  // Kiểm tra xác thực khi vào phòng
+  useEffect(() => {
+    const isHost = !!sessionStorage.getItem(`yt_room_config_${roomId}`);
+    const isAuth = sessionStorage.getItem(`yt_room_auth_${roomId}`) === 'true';
+
+    if (isHost || isAuth) {
+      setAuthStatus('authenticated');
+      return;
+    }
+
+    const lobby = getRealtimeChannel('lobby');
+    let hasChecked = false;
+    
+    // Fallback nếu lobby không phản hồi trong 2.5s thì cho phép vào (phòng có thể chưa được tạo hoặc mạng lag)
+    const timeout = setTimeout(() => {
+      if (!hasChecked) {
+        setAuthStatus('authenticated');
+      }
+    }, 2500);
+
+    lobby.on('presence', { event: 'sync' }, () => {
+      if (hasChecked) return;
+      hasChecked = true;
+      clearTimeout(timeout);
+      
+      const state = lobby.presenceState();
+      let foundRoomWithPassword = false;
+      let foundHash: string | null = null;
+      
+      Object.keys(state).forEach(ref => {
+        const presences = state[ref];
+        const room = presences.find((p: any) => p.type === 'room' && p.roomId === roomId);
+        if (room && room.hasPassword) {
+          foundRoomWithPassword = true;
+          foundHash = room.passwordHash;
+        }
+      });
+
+      if (foundRoomWithPassword && foundHash) {
+        setRoomPasswordHash(foundHash);
+        setAuthStatus('requires_password');
+      } else {
+        setAuthStatus('authenticated');
+      }
+      
+      lobby.unsubscribe();
+    });
+    
+    lobby.subscribe();
+    
+    return () => {
+      clearTimeout(timeout);
+      if (lobby) lobby.unsubscribe();
+    };
+  }, [roomId]);
+
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = nameInput.trim();
+    if (!username && !name) {
+      setPasswordError('Vui lòng nhập tên hiển thị của bạn!');
+      return;
+    }
+
+    if (simpleHash(passwordInput) === roomPasswordHash) {
+      if (!username && name) {
+        setUsername(name);
+        setHasLoadedName(true);
+        localStorage.setItem('yt_together_username', name);
+      }
+      sessionStorage.setItem(`yt_room_auth_${roomId}`, 'true');
+      setAuthStatus('authenticated');
+    } else {
+      setPasswordError('Mật khẩu không chính xác!');
+    }
+  };
 
   // Helper update DB
   const updateRoomInDb = async (updates: {
@@ -121,7 +221,16 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const clientIdRef = useRef<string | null>(null);
   if (!clientIdRef.current) {
-    clientIdRef.current = generateId();
+    if (typeof window !== 'undefined') {
+      let saved = localStorage.getItem('yt_together_clientId');
+      if (!saved) {
+        saved = generateId();
+        localStorage.setItem('yt_together_clientId', saved);
+      }
+      clientIdRef.current = saved;
+    } else {
+      clientIdRef.current = generateId();
+    }
   }
   const advancedItemIdRef = useRef<string | null>(null);
   const finishedItemIdRef = useRef<string | null>(null);
@@ -173,6 +282,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   };
 
   // Gửi tin nhắn chat thông thường
+  const handleKick = (clientId: string) => {
+    if (!channelRef.current) return;
+    // ... logic kick có thể thêm sau
+  };
+
+  // Gửi tin nhắn chat thông thường
   const handleSendMessage = (text: string) => {
     if (!channelRef.current) return;
     
@@ -195,7 +310,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       id: messageId,
       username: username,
       text: text,
-      timestamp: new Date()
+      timestamp: new Date(),
+      isSystem: false,
+      isError: false
     }].slice(-500));
   };
 
@@ -269,10 +386,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       return;
     }
 
-    const currentUser = getCurrentUser(usersRef.current);
+    const isCurrentHost = isSupabaseConfigured
+      ? dbHostClientIdRef.current === clientIdRef.current
+      : getCurrentUser(usersRef.current)?.isHost;
 
     // Chỉ host điều phối việc đếm và skip.
-    if (!currentUser?.isHost) {
+    if (!isCurrentHost) {
       return;
     }
 
@@ -320,6 +439,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   };
 
   useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     if (!username) return;
 
     const channel = getRealtimeChannel(roomId);
@@ -378,18 +498,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         setQueue(payload.queue);
       })
       .on('broadcast', { event: 'playback_state' }, ({ payload }: any) => {
-        const isCurrentHost = isSupabaseConfigured
-          ? dbHostClientId === clientIdRef.current
-          : false;
-
-        // Chỉ nhận đồng bộ nếu mình không phải Host
-        if (!isCurrentHost) {
-          setIsPlaying(payload.isPlaying);
-          if (payload.seekTime !== undefined && payload.seekTime !== null) {
-            const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
-            setSeekTime(payload.seekTime + (payload.isPlaying ? latency : 0));
-            setTimeout(() => setSeekTime(null), 100);
-          }
+        setIsPlaying(payload.isPlaying);
+        if (payload.seekTime !== undefined && payload.seekTime !== null) {
+          const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
+          setSeekTime(payload.seekTime + (payload.isPlaying ? latency : 0));
+          setTimeout(() => setSeekTime(null), 100);
         }
       })
       .on('broadcast', { event: 'host_changed' }, ({ payload }: any) => {
@@ -403,7 +516,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         }, 2500);
       })
       .on('broadcast', { event: 'request_sync' }, ({ payload }: any) => {
-        if (isSupabaseConfigured) return;
         if (payload.requesterId === clientIdRef.current) return;
         if (queueRef.current.length === 0) return; // Không có gì để sync
 
@@ -435,18 +547,22 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               currentTime: playerTimeRef.current,
               targetClientId: payload.requesterId,
               sentAt: Date.now(),
-              isFallback: !isPrimarySyncer
+              isFallback: !isPrimarySyncer,
+              hostClientId: dbHostClientIdRef.current
             }
           });
         }, delay);
       })
       .on('broadcast', { event: 'sync_state' }, ({ payload }: any) => {
-        if (isSupabaseConfigured) return;
-        const isMyTarget = payload.targetClientId === clientIdRef.current;
+        const isMyTarget = payload.targetClientId === clientIdRef.current || payload.targetRef === 'new_tab';
         if (isMyTarget && payload.queue) {
           // Chỉ nhận sync 1 lần đầu tiên hoặc khi chủ động ấn nút Đồng bộ (nút đồng bộ sẽ reset ref này)
           if (hasReceivedInitialSyncRef.current) return;
           hasReceivedInitialSyncRef.current = true;
+
+          if (payload.hostClientId) {
+            setDbHostClientId(payload.hostClientId);
+          }
 
           setQueue(payload.queue);
           setIsPlaying(payload.isPlaying);
@@ -463,12 +579,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     // Đăng ký Presence (Theo dõi danh sách Online)
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState();
-      const onlineUsers: RoomUser[] = [];
+      const uniqueUsersMap = new Map<string, RoomUser>();
       
       Object.keys(state).forEach((ref) => {
         const userPresence = state[ref][0];
-        if (userPresence) {
-          onlineUsers.push({
+        if (userPresence && userPresence.clientId) {
+          // Ghi đè nếu trùng clientId (thường do disconnect/reconnect tạo ra bóng ma session cũ)
+          uniqueUsersMap.set(userPresence.clientId, {
             presence_ref: ref,
             username: userPresence.username || 'Khách',
             color: userPresence.color || '#00F0FF',
@@ -482,12 +599,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         }
       });
       
+      const onlineUsers: RoomUser[] = Array.from(uniqueUsersMap.values());
+      
       // Sắp xếp theo thời gian tham gia để xác định thứ tự
       onlineUsers.sort((a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
 
       if (isSupabaseConfigured) {
         // --- CHẾ ĐỘ ĐỒNG BỘ QUA DATABASE ---
-        const isHostOnline = dbHostClientId ? onlineUsers.some(u => u.clientId === dbHostClientId) : false;
+        const isHostOnline = dbHostClientIdRef.current ? onlineUsers.some(u => u.clientId === dbHostClientIdRef.current) : false;
         
         if (!isHostOnline && onlineUsers.length > 0) {
           // Chưa có Host hoặc Host hiện tại đã offline. Bầu chọn người online lâu nhất làm Host mới
@@ -502,14 +621,17 @@ export default function RoomClient({ roomId }: RoomClientProps) {
               payload: { hostClientId: clientIdRef.current }
             });
             setDbHostClientId(clientIdRef.current);
-            if (dbHostClientId) {
-              addSystemMessage('👑 Chủ phòng cũ đã ngắt kết nối. Bạn đã trở thành Chủ phòng mới!');
-            }
+            addSystemMessage('👑 Chủ phòng cũ đã ngắt kết nối. Bạn đã trở thành Chủ phòng mới!');
           }
         }
 
-        usersRef.current = onlineUsers;
-        setUsers(onlineUsers);
+        const normalisedUsers = onlineUsers.map(u => ({
+          ...u,
+          isHost: u.clientId === dbHostClientIdRef.current
+        }));
+
+        usersRef.current = normalisedUsers;
+        setUsers(normalisedUsers);
       } else {
         // --- CHẾ ĐỘ OFFLINE / MOCK BROADCAST ---
         // Dynamic Host Election
@@ -580,7 +702,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
       // Check if everyone is finished (Only Host coordinates this)
       const isCurrentHost = isSupabaseConfigured
-        ? dbHostClientId === clientIdRef.current
+        ? dbHostClientIdRef.current === clientIdRef.current
         : onlineUsers.find(u => u.clientId === clientIdRef.current)?.isHost;
         
       if (isCurrentHost && onlineUsers.length > 0) {
@@ -608,26 +730,26 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         case 'SUBSCRIBED': {
           console.log('Realtime connected');
           const isFirst = usersRef.current.length === 0;
-          channel.track({
-            clientId: clientIdRef.current,
-            username,
-            color,
-            joinedAt: new Date().toISOString(),
-            isHost: isSupabaseConfigured ? false : isFirst,
-            videoFinished: false,
-            finishedItemId: null,
-            votedToSkip: false
-          });
+          try {
+            channel.track({
+              clientId: clientIdRef.current,
+              username,
+              color,
+              joinedAt: new Date().toISOString(),
+              isHost: isSupabaseConfigured ? false : isFirst,
+              videoFinished: false,
+              finishedItemId: null,
+              votedToSkip: false
+            }).catch((err: any) => console.warn('Track connect error:', err));
+          } catch (e) {}
 
-          if (!isSupabaseConfigured) {
-            syncTimeoutId = setTimeout(() => {
-              channel.send({
-                type: 'broadcast',
-                event: 'request_sync',
-                payload: { requesterId: clientIdRef.current }
-              });
-            }, 1000);
-          }
+          syncTimeoutId = setTimeout(() => {
+            channel.send({
+              type: 'broadcast',
+              event: 'request_sync',
+              payload: { requesterId: clientIdRef.current }
+            });
+          }, 1000);
           break;
         }
 
@@ -669,10 +791,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         supabase.removeChannel(lobby);
       }
     };
-  }, [username, color, roomId, dbHostClientId]);
+  }, [username, color, roomId, authStatus]);
 
   // Khởi tạo phòng trong Database khi mount
   useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     if (!isSupabaseConfigured || !supabase || !username) return;
 
     const initRoom = async () => {
@@ -742,6 +865,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   // Cập nhật số lượng người trong phòng lên Lobby Presence
   useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     if (!lobbyChannelRef.current || !username) return;
     
     let hasPassword = false;
@@ -757,15 +881,17 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       // ignore
     }
 
-    lobbyChannelRef.current.track({
-      type: 'room',
-      roomId,
-      roomName: roomName,
-      hostName: username,
-      hasPassword: hasPassword,
-      passwordHash: passwordHash,
-      userCount: Math.max(1, users.length)
-    }).catch((err: any) => console.warn('Lobby track error:', err));
+    try {
+      lobbyChannelRef.current?.track?.({
+        type: 'room',
+        roomId,
+        roomName: roomName,
+        hostName: username,
+        hasPassword: hasPassword,
+        passwordHash: passwordHash,
+        userCount: Math.max(1, users.length)
+      })?.catch((err: any) => console.warn('Lobby track error:', err));
+    } catch (e) {}
   }, [users.length, username, roomId, roomName]);
 
   // Reset videoFinished status when the current video changes
@@ -776,16 +902,18 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     
     const me = getCurrentUser(usersRef.current);
     
-    channelRef.current.track({
-      clientId: clientIdRef.current,
-      username,
-      color,
-      joinedAt: me ? me.joinedAt : new Date().toISOString(),
-      isHost: isSupabaseConfigured ? false : (me ? me.isHost || false : false),
-      videoFinished: false,
-      finishedItemId: null,
-      votedToSkip: false
-    }).catch((err: any) => console.warn('Track reset error:', err));
+    try {
+      channelRef.current?.track?.({
+        clientId: clientIdRef.current,
+        username,
+        color,
+        joinedAt: me ? me.joinedAt : new Date().toISOString(),
+        isHost: isSupabaseConfigured ? false : (me ? me.isHost || false : false),
+        videoFinished: false,
+        finishedItemId: null,
+        votedToSkip: false
+      })?.catch((err: any) => console.warn('Track reset error:', err));
+    } catch (e) {}
   }, [currentItemId, username]);
 
 
@@ -1189,7 +1317,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           queue: queueRef.current,
           isPlaying: isPlayingRef.current,
           currentTime: playerTimeRef.current,
-          targetRef: 'new_tab'
+          targetRef: 'new_tab',
+          hostClientId: dbHostClientIdRef.current
         }
       });
       showToast('🔄 Đã phát đồng bộ nhạc cho toàn phòng...');
@@ -1641,48 +1770,69 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     ? users.map(u => ({ ...u, isHost: u.clientId === dbHostClientId }))
     : users;
 
-  if (hasLoadedName && !username) {
+  // 1. Màn hình Loading khi đang kiểm tra
+  if (authStatus === 'checking' || !hasLoadedName) {
     return (
-      <div className="h-dvh w-full flex items-center justify-center p-4 bg-gradient-to-br from-black-90 to-purple-95-20">
-        <div className="glass-card w-full max-w-md p-6 flex flex-col gap-4 shadow-2xl animate-fade-in">
-          <div className="flex flex-col items-center gap-2 text-center">
-            <div className="w-12 h-12 rounded-xl bg-purple-5-20 border border-purple-5-30 flex items-center justify-center text-purple-400 shadow-md">
-              <Headphones size={24} className="text-purple-400 animate-pulse" />
-            </div>
-            <h2 className="text-xl font-bold tracking-tight text-white mt-2">Tham Gia Phòng Nhạc</h2>
-            <p className="text-xs text-muted">
-              Nhập tên hiển thị của bạn để tham gia phòng <span className="text-cyan-400 font-mono font-semibold">{roomId}</span>
-            </p>
-          </div>
+      <div className="h-[100dvh] w-full flex flex-col items-center justify-center relative overflow-hidden bg-[#080810]">
+        <div className="w-16 h-16 rounded-full border-4 border-purple-500/30 border-t-purple-500 animate-spin mb-4"></div>
+        <h2 className="text-white font-bold text-xl mb-2">Đang tải dữ liệu phòng...</h2>
+        <p className="text-neutral-400 text-sm">Vui lòng chờ trong giây lát</p>
+      </div>
+    );
+  }
 
-          <form 
-            onSubmit={(e) => {
-              e.preventDefault();
-              const name = nameInput.trim();
-              if (name) {
-                localStorage.setItem('yt_together_username', name);
-                setUsername(name);
-              }
-            }} 
-            className="flex flex-col gap-4 mt-2"
-          >
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="name-input" className="text-xs font-semibold text-muted">Tên của bạn</label>
+  // 2. Màn hình Mật khẩu (kèm nhập tên nếu chưa có tên)
+  if (authStatus === 'requires_password') {
+    return (
+      <div className="h-[100dvh] w-full flex flex-col items-center justify-center relative overflow-hidden bg-[#080810]">
+        <div className="glass-card p-8 rounded-2xl w-full max-w-sm flex flex-col items-center animate-fade-in text-center border border-purple-500/20 shadow-[0_0_50px_rgba(139,92,246,0.1)]">
+          <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mb-4 text-purple-400">
+            <LogOut size={28} className="transform -rotate-90" />
+          </div>
+          <h2 className="text-white font-bold text-2xl mb-2">Phòng Có Mật Khẩu</h2>
+          <p className="text-neutral-400 text-sm mb-6">Bạn cần nhập {!username ? 'tên và ' : ''}mật khẩu để vào phòng này</p>
+          
+          <form onSubmit={handlePasswordSubmit} className="w-full flex flex-col gap-4">
+            {!username && (
+              <div className="flex flex-col text-left gap-1.5">
+                <label className="text-xs font-semibold text-neutral-400">Tên hiển thị</label>
+                <input
+                  type="text"
+                  placeholder="Nhập tên của bạn..."
+                  value={nameInput}
+                  onChange={e => setNameInput(e.target.value)}
+                  className="glass-input py-3 px-4 rounded-xl text-white text-base focus:ring-2 focus:ring-purple-500/50"
+                  maxLength={20}
+                  autoFocus
+                />
+              </div>
+            )}
+            <div className="flex flex-col text-left gap-1.5">
+              <label className="text-xs font-semibold text-neutral-400">Mật khẩu phòng</label>
               <input
-                id="name-input"
-                type="text"
-                value={nameInput}
-                onChange={(e) => setNameInput(e.target.value)}
-                placeholder="Nhập tên hiển thị..."
-                className="glass-input text-sm"
-                maxLength={20}
-                required
-                autoFocus
+                type="password"
+                placeholder="Nhập mật khẩu..."
+                value={passwordInput}
+                onChange={e => setPasswordInput(e.target.value)}
+                className="glass-input py-3 px-4 rounded-xl text-white text-base focus:ring-2 focus:ring-purple-500/50"
+                autoFocus={!!username}
               />
+              {passwordError && (
+                <span className="text-rose-400 text-xs font-semibold px-1">{passwordError}</span>
+              )}
             </div>
-            <button type="submit" className="glass-btn w-full text-sm" style={{ cursor: 'pointer', padding: '10px' }}>
+            <button
+              type="submit"
+              className="glass-btn w-full py-3 rounded-xl mt-2"
+            >
               Vào Phòng
-              <ArrowRight size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push('/')}
+              className="glass-btn glass-btn-secondary w-full py-3 rounded-xl mt-1"
+            >
+              Quay lại Sảnh
             </button>
           </form>
         </div>
@@ -1690,10 +1840,64 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     );
   }
 
-  if (!hasLoadedName) {
+  // 3. Màn hình Nhập tên nếu chưa có tên (Phòng không mật khẩu)
+  if (!username) {
     return (
-      <div className="h-dvh w-full flex items-center justify-center bg-black-95">
-        <Disc size={32} className="animate-spin text-purple-500" />
+      <div className="h-[100dvh] w-full flex flex-col items-center justify-center relative overflow-hidden bg-[#080810]">
+        <div className="glass-card p-8 rounded-2xl w-full max-w-sm flex flex-col items-center animate-fade-in text-center border border-purple-500/20 shadow-[0_0_50px_rgba(139,92,246,0.1)] z-10">
+          <div className="w-16 h-16 rounded-full bg-purple-500/10 flex items-center justify-center mb-4 text-purple-400">
+            <Headphones size={28} />
+          </div>
+          <h2 className="text-white font-bold text-2xl mb-2">Vào Phòng</h2>
+          <p className="text-neutral-400 text-sm mb-6">Nhập tên hiển thị của bạn</p>
+          
+          <form onSubmit={(e) => { 
+            e.preventDefault(); 
+            const name = nameInput.trim();
+            if (name) { 
+              setUsername(name); 
+              setHasLoadedName(true); 
+              localStorage.setItem('yt_together_username', name);
+            } 
+          }} className="w-full flex flex-col gap-4">
+            <input
+              type="text"
+              placeholder="Tên của bạn..."
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value)}
+              className="glass-input py-3 px-4 rounded-xl text-white text-base focus:ring-2 focus:ring-purple-500/50 text-center"
+              autoFocus
+              maxLength={20}
+            />
+            
+            <div className="flex flex-wrap gap-2 justify-center mt-2 mb-4">
+              {AVATAR_COLORS.map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColor(c)}
+                  className={`w-8 h-8 rounded-full transition-transform ${color === c ? 'scale-125 ring-2 ring-white' : 'hover:scale-110 opacity-70'}`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+
+            <button
+              type="submit"
+              disabled={!nameInput.trim()}
+              className="glass-btn w-full py-3 rounded-xl mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Tham Gia
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push('/')}
+              className="glass-btn glass-btn-secondary w-full py-3 rounded-xl mt-1"
+            >
+              Quay lại Sảnh
+            </button>
+          </form>
+        </div>
       </div>
     );
   }

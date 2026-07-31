@@ -48,26 +48,46 @@ function loadYoutubeAPI(): Promise<any> {
   }
 
   youtubeApiPromise = new Promise((resolve, reject) => {
+    let checkInterval: NodeJS.Timeout | null = null;
+    
     const existingScript = document.querySelector<HTMLScriptElement>(
-      'script[src="https://www.youtube.com/iframe_api"]'
+      'script[src^="https://www.youtube.com/iframe_api"]'
     );
 
-    const timeout = window.setTimeout(() => {
+    const cleanup = () => {
       youtubeApiPromise = null;
-      if (existingScript && existingScript.parentNode) {
-        existingScript.parentNode.removeChild(existingScript);
+      if (checkInterval) {
+        clearInterval(checkInterval);
+        checkInterval = null;
       }
+      const scripts = document.querySelectorAll<HTMLScriptElement>('script[src^="https://www.youtube.com/iframe_api"]');
+      scripts.forEach(s => {
+        if (s.parentNode) s.parentNode.removeChild(s);
+      });
+      // Xóa đối tượng YT để script có thể khởi tạo lại từ đầu nếu bị lỗi giữa chừng
+      if (win.YT) {
+        try {
+          delete win.YT;
+        } catch(e) {
+          win.YT = undefined;
+        }
+      }
+    };
+
+    const timeout = window.setTimeout(() => {
+      cleanup();
       reject(new Error('Timed out loading YouTube IFrame API'));
-    }, 15000);
+    }, 30000);
 
     const previousCallback = win.onYouTubeIframeAPIReady;
 
     win.onYouTubeIframeAPIReady = () => {
       window.clearTimeout(timeout);
+      if (checkInterval) clearInterval(checkInterval);
       previousCallback?.();
 
       if (!win.YT?.Player) {
-        youtubeApiPromise = null;
+        cleanup();
         reject(new Error('YouTube API loaded without YT.Player'));
         return;
       }
@@ -76,11 +96,9 @@ function loadYoutubeAPI(): Promise<any> {
     };
 
     if (existingScript) {
-      // Nếu script đã tồn tại trong DOM nhưng sự kiện ready chưa được gọi/hoặc bị lỡ (ví dụ do HMR/hot-reload),
-      // thiết lập kiểm tra định kỳ để giải phóng Promise khi YT.Player khả dụng.
-      const checkInterval = setInterval(() => {
+      checkInterval = setInterval(() => {
         if (win.YT?.Player) {
-          clearInterval(checkInterval);
+          clearInterval(checkInterval!);
           window.clearTimeout(timeout);
           resolve(win.YT);
         }
@@ -89,15 +107,13 @@ function loadYoutubeAPI(): Promise<any> {
     }
 
     const script = document.createElement('script');
-    script.src = 'https://www.youtube.com/iframe_api';
+    // Thêm timestamp để bypass cache khi người dùng ấn retry
+    script.src = `https://www.youtube.com/iframe_api?_t=${Date.now()}`;
     script.async = true;
 
     script.onerror = () => {
       window.clearTimeout(timeout);
-      youtubeApiPromise = null;
-      if (script.parentNode) {
-        script.parentNode.removeChild(script);
-      }
+      cleanup();
       reject(new Error('Failed to load YouTube IFrame API'));
     };
 
@@ -133,6 +149,8 @@ export default function YoutubePlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [playerDuration, setPlayerDuration] = useState(0);
   const [fetchedDuration, setFetchedDuration] = useState<string | undefined>(undefined);
+  const [apiError, setApiError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const endedTriggeredRef = useRef<string | null>(null);
 
   // Reset ended trigger when videoId changes
@@ -200,6 +218,7 @@ export default function YoutubePlayer({
 
     let player: any = null;
     let cancelled = false;
+    setApiError(false);
 
     loadYoutubeAPI()
       .then((YT) => {
@@ -309,6 +328,7 @@ export default function YoutubePlayer({
       .catch((err) => {
         if (!cancelled) {
           console.error('Failed to load YouTube API:', err);
+          setApiError(true);
         }
       });
 
@@ -319,7 +339,7 @@ export default function YoutubePlayer({
       }
       playerRef.current = null;
     };
-  }, [roomId]);
+  }, [roomId, retryCount]);
 
   // Handle videoId updates
   useEffect(() => {
@@ -335,6 +355,7 @@ export default function YoutubePlayer({
     const currentVideoId = data?.video_id ?? '';
 
     if (currentVideoId !== videoId) {
+      setIsAutoplayBlocked(false); // Reset trạng thái chặn autoplay khi chuyển bài
       setIsBuffering(true); // Indicate loading for new video
       const startSeconds = seekTime ?? 0;
       if (isPlaying) {
@@ -491,9 +512,9 @@ export default function YoutubePlayer({
         }}
       >
         {/* Browser Autoplay Block Overlay */}
-        {isAutoplayBlocked && isPlaying && (
+        {isAutoplayBlocked && isPlaying && videoId && (
           <div 
-            className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-30 transition-all cursor-pointer animate-fade-in"
+            className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 backdrop-blur-md z-30 transition-all cursor-pointer animate-fade-in"
             onClick={() => {
               setIsAutoplayBlocked(false);
               const player = playerRef.current;
@@ -549,11 +570,34 @@ export default function YoutubePlayer({
         {/* Loading / Buffering Overlay */}
         {(isBuffering || (!playerReady && videoId)) && !isWaitingForOthers && !isAutoplayBlocked && (
           <div
-            className="absolute inset-0 flex flex-col items-center justify-center z-25 animate-fade-in pointer-events-none"
-            style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(2px)' }}
+            className={`absolute inset-0 flex flex-col items-center justify-center z-25 animate-fade-in ${apiError ? '' : 'pointer-events-none'}`}
+            style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}
           >
-            <div className="w-12 h-12 rounded-full border-4 border-purple-500/30 border-t-purple-500 animate-spin mb-3"></div>
-            <h3 className="font-semibold text-sm text-white">Đang tải nhạc...</h3>
+            {apiError ? (
+              <>
+                <div className="w-12 h-12 rounded-full border-2 border-red-500/50 flex items-center justify-center mb-3 text-red-400">
+                  <span className="text-xl">!</span>
+                </div>
+                <h3 className="font-semibold text-sm text-red-400 mb-2">Không thể tải YouTube API</h3>
+                <p className="text-xs text-neutral-300 max-w-xs text-center mb-4 leading-relaxed">
+                  Quá trình kết nối quá lâu. Vui lòng kiểm tra mạng hoặc thử lại.
+                </p>
+                <button
+                  onClick={() => {
+                    setApiError(false);
+                    setRetryCount(r => r + 1);
+                  }}
+                  className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg transition-colors pointer-events-auto cursor-pointer"
+                >
+                  Thử lại ngay
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-full border-4 border-purple-500/30 border-t-purple-500 animate-spin mb-3"></div>
+                <h3 className="font-semibold text-sm text-white">Đang tải nhạc...</h3>
+              </>
+            )}
           </div>
         )}
 

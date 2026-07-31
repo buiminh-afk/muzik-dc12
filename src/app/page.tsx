@@ -121,6 +121,7 @@ export default function Home() {
     if (!selectedRoom) return;
 
     if (simpleHash(joinPass) === selectedRoom.passwordHash) {
+      sessionStorage.setItem(`yt_room_auth_${selectedRoom.roomId}`, 'true');
       router.push(`/room/${selectedRoom.roomId}`);
     } else {
       setJoinError('Mật khẩu không chính xác!');

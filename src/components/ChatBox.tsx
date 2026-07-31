@@ -54,7 +54,7 @@ const formatMessageTime = (timestamp: string | number | Date): string => {
 
 const getMessageStyle = (msg: ChatMessage) => {
   if (msg.isError) {
-    return 'text-rose-400 bg-rose-600/20 border border-rose-500/10 p-2 rounded-lg';
+    return 'text-rose-400 bg-rose-600/20 border border-rose-500/10 p-2 rounded-lg text-center';
   }
   if (msg.isSystem) {
     return 'text-purple-300 bg-purple-950/20 border border-purple-500/10 p-2 rounded-lg text-center font-mono';
@@ -136,7 +136,7 @@ const ChatMessageList = React.memo(function ChatMessageList({
           const isCurrentUser =
             part.localeCompare(`@${username}`, undefined, {
               sensitivity: 'accent',
-            }) === 0;
+            }) === 0 || part.toLowerCase() === '@all';
 
           if (!isMention) {
             return <span key={index}>{part}</span>;
@@ -180,22 +180,25 @@ const ChatMessageList = React.memo(function ChatMessageList({
         return (
           <div 
             key={msg.id} 
-            className={`flex flex-col text-xs ${getMessageStyle(msg)} ${
-              isSystem ? 'my-1' : isGrouped ? 'mt-0-5 pl-3.5 relative' : 'mt-2'
+            className={`flex flex-col ${getMessageStyle(msg)} ${
+              isSystem ? 'my-1' : isGrouped ? 'mt-0-5 pl-3.5 relative' : 'mt-2.5'
             }`}
+            style={{
+              fontSize: isSystem ? '12px' : '14px',
+            }}
           >
             {!isSystem && !isGrouped && (
-              <div className="flex items-baseline gap-2 mb-0.5 select-none">
-                <span className="font-bold text-purple-400 font-mono">{msg.username}</span>
-                <span className="text-muted" style={{ fontSize: '9px' }}>
+              <div className="flex items-baseline gap-2 mb-1 select-none">
+                <span className="font-bold text-purple-400 font-mono text-[12.5px] tracking-tight">{msg.username}</span>
+                <span className="text-muted" style={{ fontSize: '10px' }}>
                   {formatMessageTime(msg.timestamp)}
                 </span>
               </div>
             )}
             {isGrouped && (
-              <div className="absolute left-1.5 top-1.5 w-1 h-1 rounded-full bg-purple-500/20" />
+              <div className="absolute left-1.5 top-2.5 w-1 h-1 rounded-full bg-purple-500/30" />
             )}
-            <p className={isSystem ? 'leading-relaxed' : 'text-neutral-200 break-words whitespace-pre-wrap'}>
+            <p className={isSystem ? 'leading-relaxed' : 'text-neutral-200 break-words whitespace-pre-wrap leading-snug'}>
               {isSystem ? msg.text : renderMessageText(msg.text)}
             </p>
           </div>
@@ -282,6 +285,10 @@ function ChatComposer({
           normalisedName.startsWith(query)
         );
       });
+
+    if ('all'.startsWith(query)) {
+      suggestions.push('all');
+    }
 
     setMentionSuggestions(suggestions);
     setSelectedSuggestionIndex(0);
@@ -615,13 +622,17 @@ export default function ChatBox({
   const mentionPattern = useMemo(() => {
     const names = users
       .map((user) => user.username)
-      .filter(Boolean)
+      .filter(Boolean);
+      
+    names.push('all');
+    
+    const uniqueNames = Array.from(new Set(names))
       .sort((a, b) => b.length - a.length)
       .map(escapeRegExp);
 
-    if (names.length === 0) return null;
+    if (uniqueNames.length === 0) return null;
 
-    return new RegExp(`(@(?:${names.join('|')}))`, 'giu');
+    return new RegExp(`(@(?:${uniqueNames.join('|')}))`, 'giu');
   }, [users]);
 
   return (
