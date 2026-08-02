@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { Send, Terminal, HelpCircle, Smile } from 'lucide-react';
 import { RoomUser } from './UsersList';
+import { Tabs, Tab, Input, Button, Popover, PopoverTrigger, PopoverContent, ScrollShadow, Card, Listbox, ListboxItem } from "@nextui-org/react";
 
 export interface ChatMessage {
   id: string;
@@ -40,7 +41,6 @@ const ALLOWED_CMDS = [
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Helper to format timestamps safely
 const formatMessageTime = (timestamp: string | number | Date): string => {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
@@ -54,15 +54,14 @@ const formatMessageTime = (timestamp: string | number | Date): string => {
 
 const getMessageStyle = (msg: ChatMessage) => {
   if (msg.isError) {
-    return 'text-rose-400 bg-rose-600/20 border border-rose-500/10 p-2 rounded-lg text-center';
+    return 'text-danger bg-danger/10 border border-danger/20 p-2 rounded-lg text-center';
   }
   if (msg.isSystem) {
-    return 'text-purple-300 bg-purple-950/20 border border-purple-500/10 p-2 rounded-lg text-center font-mono';
+    return 'text-secondary bg-secondary/10 border border-secondary/20 p-2 rounded-lg text-center font-mono';
   }
   return '';
 };
 
-// Helper for finding context of mention
 const getMentionContext = (
   value: string,
   cursor: number,
@@ -85,7 +84,6 @@ const getMentionContext = (
   };
 };
 
-// --- CHAT MESSAGE LIST COMPONENT (MEMOIZED) ---
 interface ChatMessageListProps {
   messages: ChatMessage[];
   username: string;
@@ -147,8 +145,8 @@ const ChatMessageList = React.memo(function ChatMessageList({
               key={index}
               className={
                 isCurrentUser
-                  ? 'font-bold px-0.5 rounded text-yellow-300 bg-yellow-500/15'
-                  : 'font-bold px-0.5 rounded text-cyan-300'
+                  ? 'font-bold px-1 rounded text-warning bg-warning/20'
+                  : 'font-bold px-1 rounded text-primary bg-primary/10'
               }
             >
               {part}
@@ -160,16 +158,15 @@ const ChatMessageList = React.memo(function ChatMessageList({
   };
 
   return (
-    <div
+    <ScrollShadow
       ref={messagesContainerRef}
       onScroll={handleMessagesScroll}
-      className="flex-1 overflow-y-auto pr-1 flex flex-col mb-3 p-3 rounded-lg bg-black-20 border border-white-5 min-h-0"
+      className="flex-1 flex flex-col mb-3 p-3 rounded-xl bg-content1 border border-default-100 min-h-0"
     >
       {messages.map((msg, index) => {
         const isSystem = msg.isSystem || msg.isError;
         const prevMsg = index > 0 ? messages[index - 1] : null;
         
-        // Group consecutive user messages sent within 2 minutes
         const isGrouped = 
           prevMsg && 
           !isSystem && 
@@ -181,7 +178,7 @@ const ChatMessageList = React.memo(function ChatMessageList({
           <div 
             key={msg.id} 
             className={`flex flex-col ${getMessageStyle(msg)} ${
-              isSystem ? 'my-1' : isGrouped ? 'mt-0-5 pl-3.5 relative' : 'mt-2.5'
+              isSystem ? 'my-1' : isGrouped ? 'mt-1' : 'mt-3'
             }`}
             style={{
               fontSize: isSystem ? '12px' : '14px',
@@ -189,27 +186,24 @@ const ChatMessageList = React.memo(function ChatMessageList({
           >
             {!isSystem && !isGrouped && (
               <div className="flex items-baseline gap-2 mb-1 select-none">
-                <span className="font-bold text-purple-400 font-mono text-[12.5px] tracking-tight">{msg.username}</span>
-                <span className="text-muted" style={{ fontSize: '10px' }}>
+                <span className="font-bold text-secondary font-mono text-[13px] tracking-tight">{msg.username}</span>
+                <span className="text-default-400 text-[10px]">
                   {formatMessageTime(msg.timestamp)}
                 </span>
               </div>
             )}
-            {isGrouped && (
-              <div className="absolute left-1.5 top-2.5 w-1 h-1 rounded-full bg-purple-500/30" />
-            )}
-            <p className={isSystem ? 'leading-relaxed' : 'text-neutral-200 break-words whitespace-pre-wrap leading-snug'}>
+
+            <p className={isSystem ? 'leading-relaxed' : 'text-default-700 break-words whitespace-pre-wrap leading-snug'}>
               {isSystem ? msg.text : renderMessageText(msg.text)}
             </p>
           </div>
         );
       })}
       <div ref={chatEndRef} />
-    </div>
+    </ScrollShadow>
   );
 });
 
-// --- CHAT COMPOSER COMPONENT ---
 interface ChatComposerProps {
   users: RoomUser[];
   username: string;
@@ -233,18 +227,6 @@ function ChatComposer({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const reactionRef = useRef<HTMLDivElement>(null);
-
-  // Click outside to close reactions
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (reactionRef.current && !reactionRef.current.contains(e.target as Node)) {
-        setShowReactions(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -404,6 +386,11 @@ function ChatComposer({
       console.error('Lỗi khi gửi tin nhắn:', err);
     } finally {
       setIsSubmitting(false);
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 0);
     }
   };
 
@@ -417,163 +404,119 @@ function ChatComposer({
     <div className="relative">
       {/* Command autocomplete dropdown */}
       {commandSuggestions.length > 0 && (
-        <div
-          id="chat-suggestions"
-          role="listbox"
-          style={{
-            position: 'absolute',
-            bottom: 'calc(100% + 6px)',
-            left: 0,
-            right: 0,
-            background: 'var(--bg-primary)',
-            border: '1.5px solid var(--glass-border)',
-            borderRadius: '12px',
-            boxShadow: '0 -8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(168,85,247,0.1)',
-            backdropFilter: 'blur(16px)',
-            zIndex: 999,
-            overflow: 'hidden',
-          }}
+        <Card
+          className="absolute bottom-full left-0 right-0 mb-2 z-50 overflow-hidden"
+          shadow="lg"
         >
-          <div style={{ padding: '4px' }}>
+          <Listbox
+            aria-label="Command suggestions"
+            onAction={(key) => insertCommand(key as string)}
+            className="p-1"
+          >
             {commandSuggestions.map((item, idx) => (
-              <button
+              <ListboxItem
                 key={item.cmd}
-                id={`chat-suggestion-${idx}`}
-                role="option"
-                aria-selected={idx === safeSuggestionIndex}
-                type="button"
-                onClick={() => insertCommand(item.cmd)}
-                className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs rounded-lg text-left transition-colors"
-                style={{
-                  cursor: 'pointer',
-                  background: idx === safeSuggestionIndex ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
-                  border: 'none',
-                  color: 'var(--text-main)'
-                }}
+                className={idx === safeSuggestionIndex ? 'bg-default-200' : ''}
+                textValue={item.cmd}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ color: '#a855f7', fontFamily: 'monospace', fontWeight: 700 }}>/</span>
-                  <span style={{ fontWeight: 600 }}>{item.cmd.slice(1)}</span>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-1 font-mono text-secondary">
+                    <span className="font-bold">/</span>
+                    <span className="font-semibold">{item.cmd.slice(1)}</span>
+                  </div>
+                  <span className="text-[10px] text-default-500">{item.desc}</span>
                 </div>
-                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{item.desc}</span>
-              </button>
+              </ListboxItem>
             ))}
-          </div>
-        </div>
+          </Listbox>
+        </Card>
       )}
 
       {/* Mention autocomplete dropdown */}
       {mentionSuggestions.length > 0 && (
-        <div
-          id="chat-suggestions"
-          role="listbox"
-          style={{
-            position: 'absolute',
-            bottom: 'calc(100% + 6px)',
-            left: 0,
-            right: 0,
-            background: 'var(--bg-primary)',
-            border: '1.5px solid var(--glass-border)',
-            borderRadius: '12px',
-            boxShadow: '0 -8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(168,85,247,0.1)',
-            backdropFilter: 'blur(16px)',
-            zIndex: 999,
-            overflow: 'hidden',
-          }}
+        <Card
+          className="absolute bottom-full left-0 right-0 mb-2 z-50 overflow-hidden"
+          shadow="lg"
         >
-          <div style={{ padding: '4px' }}>
+          <Listbox
+            aria-label="Mention suggestions"
+            onAction={(key) => insertMention(key as string)}
+            className="p-1"
+          >
             {mentionSuggestions.map((name, idx) => (
-              <button
+              <ListboxItem
                 key={name}
-                id={`chat-suggestion-${idx}`}
-                role="option"
-                aria-selected={idx === safeSuggestionIndex}
-                type="button"
-                onClick={() => insertMention(name)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs rounded-lg text-left transition-colors"
-                style={{
-                  cursor: 'pointer',
-                  background: idx === safeSuggestionIndex ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
-                  border: 'none',
-                  color: 'var(--text-main)'
-                }}
+                className={idx === safeSuggestionIndex ? 'bg-default-200' : ''}
+                textValue={name}
               >
-                <span style={{ color: '#22d3ee', fontFamily: 'monospace', fontWeight: 700 }}>@</span>
-                <span style={{ fontWeight: 600 }}>{name}</span>
-              </button>
+                <div className="flex items-center gap-1 font-mono text-primary">
+                  <span className="font-bold">@</span>
+                  <span className="font-semibold">{name}</span>
+                </div>
+              </ListboxItem>
             ))}
-          </div>
-        </div>
+          </Listbox>
+        </Card>
       )}
 
       <form onSubmit={handleSubmit} className="flex gap-2 items-center">
-        <input
+        <Input
           ref={inputRef}
           type="text"
-          role="combobox"
-          aria-expanded={hasSuggestions}
-          aria-controls={hasSuggestions ? 'chat-suggestions' : undefined}
-          aria-activedescendant={hasSuggestions ? `chat-suggestion-${safeSuggestionIndex}` : undefined}
           placeholder="Gõ tin nhắn, lệnh /play, /vs... hoặc @tên"
           value={inputText}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          className="glass-input flex-1 py-2 px-3 text-xs"
-          style={{ height: '36px' }}
+          className="flex-1"
+          size="sm"
+          radius="lg"
+          variant="faded"
           maxLength={200}
-          disabled={isSubmitting}
         />
+        
         {/* Emoji Button */}
-        <div className="relative flex" ref={reactionRef}>
-          <button
-            type="button"
-            onClick={() => setShowReactions(!showReactions)}
-            className="glass-btn rounded-lg flex-shrink-0 flex items-center justify-center"
-            style={{ cursor: 'pointer', width: '36px', height: '36px', padding: 0 }}
-            title="Biểu cảm"
-            aria-label="Mở danh sách biểu cảm"
-          >
-            <Smile size={15} />
-          </button>
-
-          {showReactions && (
-            <div
-              className="absolute p-2 glass-card rounded-xl shadow-xl flex items-center gap-1 z-50 animate-fade-in"
-              style={{
-                bottom: '100%',
-                right: '0',
-                marginBottom: '8px',
-                backgroundColor: 'var(--bg-primary)',
-                border: '1px solid var(--glass-border)',
-              }}
+        <Popover placement="top" isOpen={showReactions} onOpenChange={setShowReactions}>
+          <PopoverTrigger>
+            <Button
+              isIconOnly
+              size="sm"
+              variant="flat"
+              color="secondary"
+              aria-label="Mở danh sách biểu cảm"
             >
+              <Smile size={16} />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent>
+            <div className="flex items-center gap-2 px-1 py-2">
               {['❤️', '🔥', '👍', '🎉', '😆', '🖕'].map((emoji) => (
-                <button
+                <Button
                   key={emoji}
-                  type="button"
-                  onClick={() => {
+                  isIconOnly
+                  variant="light"
+                  className="text-xl"
+                  onPress={() => {
                     onSendReaction?.(emoji);
                     setShowReactions(false);
                   }}
-                  className="text-lg hover:scale-125 transition-transform bg-[#ffffff0d] p-1.5 rounded-full cursor-pointer border border-[#ffffff0d]"
                 >
                   {emoji}
-                </button>
+                </Button>
               ))}
             </div>
-          )}
-        </div>
+          </PopoverContent>
+        </Popover>
 
-        <button
+        <Button
           type="submit"
-          className="glass-btn rounded-lg flex-shrink-0 flex items-center justify-center"
-          style={{ cursor: 'pointer', width: '36px', height: '36px', padding: 0 }}
-          title="Gửi (Enter)"
+          isIconOnly
+          size="sm"
+          color="primary"
           aria-label="Gửi tin nhắn"
-          disabled={isSubmitting}
+          isDisabled={isSubmitting || !inputText.trim()}
         >
-          <Send size={15} />
-        </button>
+          <Send size={16} />
+        </Button>
       </form>
     </div>
   );
@@ -589,35 +532,7 @@ export default function ChatBox({
   onSendReaction,
 }: ChatBoxProps) {
   const [showHelp, setShowHelp] = useState(false);
-  const helpPanelRef = useRef<HTMLDivElement>(null);
-
-  // Close help panel on Escape or click outside
-  useEffect(() => {
-    const handleKeyDownGlobal = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowHelp(false);
-      }
-    };
-
-    const handleClickOutsideGlobal = (e: MouseEvent) => {
-      if (helpPanelRef.current && !helpPanelRef.current.contains(e.target as Node)) {
-        const target = e.target as HTMLElement;
-        if (!target.closest('.help-toggle-btn')) {
-          setShowHelp(false);
-        }
-      }
-    };
-
-    if (showHelp) {
-      document.addEventListener('keydown', handleKeyDownGlobal);
-      document.addEventListener('mousedown', handleClickOutsideGlobal);
-    }
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDownGlobal);
-      document.removeEventListener('mousedown', handleClickOutsideGlobal);
-    };
-  }, [showHelp]);
+  const [activeTab, setActiveTab] = useState<'chat' | 'system'>('chat');
 
   const mentionPattern = useMemo(() => {
     const names = users
@@ -635,177 +550,153 @@ export default function ChatBox({
     return new RegExp(`(@(?:${uniqueNames.join('|')}))`, 'giu');
   }, [users]);
 
+  // Filter messages based on active tab
+  const filteredMessages = useMemo(() => {
+    return messages.filter((msg) => {
+      const isSystem = msg.isSystem || msg.isError || msg.username === 'Hệ thống';
+      return activeTab === 'system' ? isSystem : !isSystem;
+    });
+  }, [messages, activeTab]);
+
+  const chatCount = useMemo(() => 
+    messages.filter(m => !(m.isSystem || m.isError || m.username === 'Hệ thống')).length, 
+    [messages]
+  );
+  
+  const systemCount = useMemo(() => 
+    messages.filter(m => m.isSystem || m.isError || m.username === 'Hệ thống').length, 
+    [messages]
+  );
+
   return (
     <div className="flex flex-col h-full relative">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Terminal size={18} className="text-purple-400" />
-          <span className="text-sm font-semibold uppercase tracking-wider text-muted">
+          <Terminal size={18} className="text-secondary" />
+          <span className="text-sm font-semibold uppercase tracking-wider text-default-500">
             Khung Chat & Lệnh
           </span>
         </div>
-        <button
-          onClick={() => setShowHelp(!showHelp)}
-          className="text-xs flex items-center gap-1 transition-all rounded help-toggle-btn hover:text-white"
-          style={{
-            cursor: 'pointer',
-            outline: 'none',
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--glass-border)',
-            padding: '4px 8px',
-            color: 'var(--text-muted)'
-          }}
-          aria-label="Xem danh sách lệnh hỗ trợ"
-        >
-          <HelpCircle size={13} />
-          Xem Lệnh
-        </button>
+        <Popover placement="bottom-end" isOpen={showHelp} onOpenChange={setShowHelp}>
+          <PopoverTrigger>
+            <Button size="sm" variant="light" className="text-default-500">
+              <HelpCircle size={14} /> Xem Lệnh
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[300px] p-0 bg-content1 border border-default-200">
+            <Card className="w-full border-none shadow-none bg-transparent">
+              <div className="flex justify-between items-center p-3 border-b border-default-100">
+                <h4 className="font-bold text-xs flex items-center gap-1.5 text-secondary">
+                  <Terminal size={12} />
+                  DANH SÁCH LỆNH TRONG PHÒNG
+                </h4>
+              </div>
+              <ScrollShadow className="p-3 max-h-[250px] flex flex-col gap-3">
+                {/* Lệnh /play */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                    <code className="text-cyan-400 font-mono font-bold text-[11px]">/play &lt;link&gt;</code>
+                    <span className="text-default-400 text-[10px]">hoặc</span>
+                    <code className="text-cyan-400 font-mono font-bold text-[11px]">/p</code>
+                  </div>
+                  <p className="text-default-500 pl-3.5 text-[10px]">Phát video hoặc thêm vào hàng đợi.</p>
+                </div>
+
+                {/* Lệnh /pause */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+                    <code className="text-cyan-400 font-mono font-bold text-[11px]">/pause</code>
+                  </div>
+                  <p className="text-default-500 pl-3.5 text-[10px]">Tạm dừng phát nhạc trong phòng.</p>
+                </div>
+
+                {/* Lệnh /resume */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-success" />
+                    <code className="text-cyan-400 font-mono font-bold text-[11px]">/resume</code>
+                  </div>
+                  <p className="text-default-500 pl-3.5 text-[10px]">Tiếp tục phát nhạc đang tạm dừng.</p>
+                </div>
+
+                {/* Lệnh /voteskip */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+                    <code className="text-cyan-400 font-mono font-bold text-[11px]">/voteskip</code>
+                    <span className="text-default-400 text-[10px]">hoặc</span>
+                    <code className="text-cyan-400 font-mono font-bold text-[11px]">/vs</code>
+                  </div>
+                  <p className="text-default-500 pl-3.5 text-[10px]">Bình chọn bỏ qua bài (60% đồng ý).</p>
+                </div>
+
+                {/* Lệnh /clear */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-danger" />
+                    <code className="text-cyan-400 font-mono font-bold text-[11px]">/clear</code>
+                  </div>
+                  <p className="text-default-500 pl-3.5 text-[10px]">Xóa toàn bộ các bài hát trong hàng đợi.</p>
+                </div>
+
+                {/* Lệnh /queue */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
+                    <code className="text-cyan-400 font-mono font-bold text-[11px]">/queue</code>
+                  </div>
+                  <p className="text-default-500 pl-3.5 text-[10px]">Hiển thị danh sách các bài hát trong hàng chờ.</p>
+                </div>
+
+                {/* @mention */}
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                    <code className="text-cyan-400 font-mono font-bold text-[11px]">@username</code>
+                  </div>
+                  <p className="text-default-500 pl-3.5 text-[10px]">Nhắc đến ai đó trong chat.</p>
+                </div>
+              </ScrollShadow>
+            </Card>
+          </PopoverContent>
+        </Popover>
       </div>
 
-      {/* Help Panel */}
-      {showHelp && (
-        <div
-          ref={helpPanelRef}
-          className="absolute p-4 rounded-xl border text-xs leading-relaxed animate-fade-in z-30 shadow-2xl"
-          style={{
-            top: '36px',
-            left: '8px',
-            right: '8px',
-            background: 'linear-gradient(135deg, rgba(17, 12, 28, 0.96), rgba(8, 8, 16, 0.99))',
-            backdropFilter: 'blur(16px)',
-            border: '1.5px solid rgba(168, 85, 247, 0.25)',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.9)',
-          }}
-        >
-          <div className="flex justify-between items-center mb-3 pb-2 border-b border-[#ffffff0d]">
-            <h4
-              className="font-bold tracking-wide bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent flex items-center gap-1.5"
-              style={{ fontSize: '11px' }}
-            >
-              <Terminal size={13} className="text-purple-400" />
-              DANH SÁCH LỆNH TRONG PHÒNG
-            </h4>
-            <button
-              onClick={() => setShowHelp(false)}
-              className="w-5 h-5 rounded-full flex items-center justify-center text-neutral-400 hover:text-rose-400 bg-[#ffffff0d] hover:bg-rose-500/10 border border-[#ffffff1a] transition-all active:scale-95"
-              style={{ cursor: 'pointer', fontSize: '9px' }}
-              title="Đóng trợ giúp"
-              aria-label="Đóng trợ giúp"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-            {/* Lệnh /play */}
-            <div className="flex flex-col gap-0.5 p-1 rounded hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  /play &lt;link&gt;
-                </code>
-                <span className="text-muted text-[10px]">hoặc</span>
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  /p
-                </code>
-              </div>
-              <p className="text-neutral-300 pl-3.5" style={{ fontSize: '10.5px' }}>
-                Phát video hoặc thêm vào hàng đợi (hỗ trợ cả link playlist).
-              </p>
+      {/* Tabs Selector */}
+      <Tabs 
+        aria-label="Chat Tabs" 
+        selectedKey={activeTab} 
+        onSelectionChange={(k) => setActiveTab(k as 'chat' | 'system')}
+        fullWidth
+        size="sm"
+        color="secondary"
+        className="mb-2"
+      >
+        <Tab 
+          key="chat" 
+          title={
+            <div className="flex items-center gap-2">
+              💬 Trò chuyện 
+              {chatCount > 0 && <span className="bg-default-200 text-default-600 px-1.5 rounded-full text-[10px]">{chatCount}</span>}
             </div>
-
-            {/* Lệnh /pause */}
-            <div className="flex flex-col gap-0.5 p-1 rounded hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  /pause
-                </code>
-              </div>
-              <p className="text-neutral-300 pl-3.5" style={{ fontSize: '10.5px' }}>
-                Tạm dừng phát nhạc trong phòng.
-              </p>
+          }
+        />
+        <Tab 
+          key="system" 
+          title={
+            <div className="flex items-center gap-2">
+              🎵 Thông báo
+              {systemCount > 0 && <span className="bg-default-200 text-default-600 px-1.5 rounded-full text-[10px]">{systemCount}</span>}
             </div>
-
-            {/* Lệnh /resume */}
-            <div className="flex flex-col gap-0.5 p-1 rounded hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  /resume
-                </code>
-              </div>
-              <p className="text-neutral-300 pl-3.5" style={{ fontSize: '10.5px' }}>
-                Tiếp tục phát nhạc đang tạm dừng.
-              </p>
-            </div>
-
-            {/* Lệnh /voteskip */}
-            <div className="flex flex-col gap-0.5 p-1 rounded hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  /voteskip
-                </code>
-                <span className="text-muted text-[10px]">hoặc</span>
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  /vs
-                </code>
-              </div>
-              <p className="text-neutral-300 pl-3.5" style={{ fontSize: '10.5px' }}>
-                Bình chọn bỏ qua bài — cần 60% người trong phòng đồng ý.
-              </p>
-            </div>
-
-            {/* Lệnh /clear */}
-            <div className="flex flex-col gap-0.5 p-1 rounded hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  /clear
-                </code>
-              </div>
-              <p className="text-neutral-300 pl-3.5" style={{ fontSize: '10.5px' }}>
-                Xóa toàn bộ các bài hát đang có trong hàng đợi chờ.
-              </p>
-            </div>
-
-            {/* Lệnh /queue */}
-            <div className="flex flex-col gap-0.5 p-1 rounded hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  /queue
-                </code>
-                <span className="text-muted text-[10px]">hoặc</span>
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  /q
-                </code>
-              </div>
-              <p className="text-neutral-300 pl-3.5" style={{ fontSize: '10.5px' }}>
-                Hiển thị danh sách các bài hát trong hàng chờ hiện tại.
-              </p>
-            </div>
-
-            {/* @mention */}
-            <div className="flex flex-col gap-0.5 p-1 rounded hover:bg-white/[0.02] transition-colors">
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-pink-400" />
-                <code className="text-cyan-400 font-mono font-bold" style={{ fontSize: '11px' }}>
-                  @username
-                </code>
-              </div>
-              <p className="text-neutral-300 pl-3.5" style={{ fontSize: '10.5px' }}>
-                Nhắc đến ai đó trong chat — họ sẽ nhận thông báo.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+          } 
+        />
+      </Tabs>
 
       {/* Messages List */}
       <ChatMessageList
-        messages={messages}
+        messages={filteredMessages}
         username={username}
         users={users}
         mentionPattern={mentionPattern}

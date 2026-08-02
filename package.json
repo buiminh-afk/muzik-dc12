@@ -9,12 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@nextui-org/react": "^2.6.11",
     "@supabase/supabase-js": "^2.110.8",
+    "autoprefixer": "^10.5.4",
+    "framer-motion": "^12.43.0",
     "intro.js": "^8.5.0",
     "lucide-react": "^1.26.0",
     "next": "16.2.11",
+    "postcss": "^8.5.25",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "tailwindcss": "^3.4.19",
     "ws": "^8.21.1"
   },
   "devDependencies": {

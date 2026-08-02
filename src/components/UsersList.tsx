@@ -1,6 +1,6 @@
 'use client';
 
-import { Users, Shield, FastForward } from 'lucide-react';
+import { Users, Crown, FastForward } from 'lucide-react';
 
 export interface RoomUser {
   presence_ref: string;
@@ -39,49 +39,42 @@ export default function UsersList({ users, myClientId }: UsersListProps) {
           return (
             <div
               key={user.presence_ref}
-              className={`flex items-center gap-2-5 p-2 rounded-lg border transition-all ${
+              className={`flex items-center gap-3 p-2 rounded-lg border transition-all ${
                 isMe
-                  ? 'bg-purple-95-10 border-purple-50-20'
-                  : 'bg-white-01 border-white-5'
+                  ? 'bg-secondary/10 border-secondary/20'
+                  : 'bg-default-100 border-default-200'
               }`}
             >
               {/* Avatar với viền màu được gán ngẫu nhiên */}
-              <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white relative shadow-inner"
-                style={{
-                  backgroundColor: `${user.color}25`,
-                  border: `1.5px solid ${user.color}`,
-                  textShadow: `0 0 4px ${user.color}80`,
-                  boxShadow: `inset 0 0 6px ${user.color}30, 0 0 8px ${user.color}20`
-                }}
-              >
-                {firstLetter}
-                <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-500 border border-black"></span>
+              <div className="relative">
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shadow-inner"
+                  style={{
+                    backgroundColor: `${user.color}30`,
+                    border: `2px solid ${user.color}`,
+                    textShadow: `0 0 4px ${user.color}80`
+                  }}
+                >
+                  {firstLetter}
+                </div>
+                <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-success border-2 border-background"></span>
               </div>
 
               {/* Username */}
-              <div className="flex-1 min-w-0 flex items-center gap-1-5">
+              <div className="flex-1 min-w-0 flex items-center gap-2">
                 <span
-                  className={`text-xs truncate ${isMe ? 'text-purple-200 font-semibold' : 'text-neutral-300'}`}
+                  className={`text-sm truncate ${isMe ? 'text-secondary font-bold' : 'text-foreground'}`}
                   title={user.username}
                 >
                   {user.username}
                 </span>
                 {isMe && (
-                  <span 
-                    className="py-0.5 rounded bg-purple-50-20 border border-purple-50-30 text-purple-300 font-mono scale-90"
-                    style={{ fontSize: '9px', paddingLeft: '6px', paddingRight: '6px' }}
-                  >
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-secondary/20 text-secondary shrink-0">
                     Bạn
                   </span>
                 )}
                 {user.isHost && (
-                  <span
-                    className="text-amber-400 flex items-center"
-                    title="Chủ phòng"
-                  >
-                    <Shield size={12} fill="currentColor" style={{ opacity: 0.8 }} />
-                  </span>
+                  <Crown size={14} className="text-warning shrink-0" />
                 )}
                 {user.votedToSkip && (
                   <span

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Loader2, Plus, Search } from 'lucide-react';
+import { Input, Card, CardBody, Button, Spinner, Image } from "@nextui-org/react";
 
 export interface YouTubeSearchResult {
   videoId: string;
@@ -168,13 +169,13 @@ export default function SearchUI({ onAddVideo }: SearchUIProps) {
   return (
     <div
       ref={searchRef}
-      className="relative mx-auto min-w-[200px] max-w-sm flex-1"
+      className="relative mx-auto min-w-[200px] w-full max-w-sm flex-1 z-50"
     >
-      <form onSubmit={handleSearch} className="relative">
-        <input
+      <form onSubmit={handleSearch} className="relative w-full">
+        <Input
           type="text"
           value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
+          onValueChange={setSearchQuery}
           onFocus={() => {
             if (searchResults.length > 0 || searchError || isSearching) {
               setShowSearchDropdown(true);
@@ -187,107 +188,89 @@ export default function SearchUI({ onAddVideo }: SearchUIProps) {
           }}
           maxLength={100}
           placeholder="Tìm nhạc trên YouTube..."
-          role="combobox"
-          aria-expanded={showSearchDropdown}
-          aria-controls="youtube-search-results"
-          aria-autocomplete="list"
-          className="w-full glass-input text-sm placeholder:text-muted focus:outline-none"
-          style={{ paddingTop: '6px', paddingBottom: '6px', paddingLeft: '32px', paddingRight: '12px' }}
+          variant="faded"
+          radius="full"
+          endContent={
+            <Button
+              isIconOnly
+              size="sm"
+              variant="light"
+              type="submit"
+              isDisabled={!searchQuery.trim() || isSearching}
+              className="text-default-500"
+            >
+              {isSearching ? <Spinner size="sm" color="secondary" /> : <Search size={18} />}
+            </Button>
+          }
         />
-
-        <button
-          type="submit"
-          disabled={!searchQuery.trim() || isSearching}
-          aria-label="Tìm kiếm"
-          className="absolute rounded p-1 text-muted hover:text-main disabled:opacity-50 border-none bg-transparent cursor-pointer flex items-center justify-center"
-          style={{
-            left: '8px',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            outline: 'none'
-          }}
-        >
-          {isSearching ? (
-            <Loader2 size={14} className="animate-spin text-purple-400" />
-          ) : (
-            <Search size={14} />
-          )}
-        </button>
       </form>
 
       {showSearchDropdown && (
-        <div
-          id="youtube-search-results"
-          role="listbox"
-          className="custom-scrollbar absolute left-0 right-0 top-full z-50 mt-2 max-h-[300px] overflow-y-auto rounded-xl border shadow-2xl"
-          style={{
-            backgroundColor: 'var(--bg-primary)',
-          }}
+        <Card
+          className="absolute left-0 right-0 top-full mt-2 w-full max-h-[350px] z-50 shadow-2xl border border-default-200"
+          radius="lg"
         >
-          {isSearching ? (
-            <div className="flex flex-col items-center justify-center gap-2 p-4 text-muted select-none">
-              <Loader2 size={20} className="animate-spin text-purple-500" />
-              <span className="text-xs">Đang tìm kiếm...</span>
-            </div>
-          ) : searchError ? (
-            <div className="p-4 text-center text-xs text-rose-400 select-none">
-              {searchError}
-            </div>
-          ) : searchResults.length > 0 ? (
-            <div className="flex flex-col py-1">
-              {searchResults.map((result) => (
-                <div
-                  key={result.videoId}
-                  role="option"
-                  aria-selected="false"
-                  className="group flex items-center gap-3 p-2 transition-colors hover:bg-white/5"
-                >
-                  <div className="relative aspect-video w-16 shrink-0 overflow-hidden rounded bg-black select-none">
-                    <SearchThumbnail result={result} />
-                    {result.duration && (
-                      <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1 font-mono text-[9px] text-white">
-                        {result.duration}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span
-                      className="block w-full truncate text-xs font-medium text-main"
-                      title={result.title}
-                    >
-                      {result.title}
-                    </span>
-                    <span
-                      className="truncate text-[10px] text-muted select-none"
-                      title={result.channelTitle}
-                    >
-                      {result.channelTitle}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={addingVideoId !== null}
-                    onClick={() => void handleAddVideo(result)}
-                    className="shrink-0 rounded-full bg-white/5 p-2 text-muted transition-colors hover:bg-purple-500/20 hover:text-purple-400 disabled:opacity-50 border-none cursor-pointer flex items-center justify-center"
-                    aria-label={`Thêm ${result.title} vào hàng đợi`}
+          <CardBody className="p-0 custom-scrollbar overflow-y-auto">
+            {isSearching ? (
+              <div className="flex flex-col items-center justify-center gap-2 p-8 text-default-400">
+                <Spinner color="secondary" />
+                <span className="text-sm mt-2">Đang tìm kiếm...</span>
+              </div>
+            ) : searchError ? (
+              <div className="p-6 text-center text-sm text-danger">
+                {searchError}
+              </div>
+            ) : searchResults.length > 0 ? (
+              <div className="flex flex-col">
+                {searchResults.map((result) => (
+                  <div
+                    key={result.videoId}
+                    className="flex items-center gap-3 p-3 transition-colors hover:bg-default-100 cursor-default border-b border-default-100 last:border-none"
                   >
-                    {addingVideoId === result.videoId ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      <Plus size={16} />
-                    )}
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : submittedQuery ? (
-            <div className="p-4 text-center text-xs text-muted select-none">
-              Không tìm thấy kết quả cho “{submittedQuery}”.
-            </div>
-          ) : null}
-        </div>
+                    <div className="relative aspect-video w-24 shrink-0 overflow-hidden rounded-md bg-black">
+                      <SearchThumbnail result={result} />
+                      {result.duration && (
+                        <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1 font-mono text-[10px] text-white">
+                          {result.duration}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex min-w-0 flex-1 flex-col justify-center">
+                      <span className="block w-full truncate text-sm font-semibold text-foreground" title={result.title}>
+                        {result.title}
+                      </span>
+                      <span className="truncate text-xs text-default-500 mt-0.5" title={result.channelTitle}>
+                        {result.channelTitle}
+                      </span>
+                    </div>
+
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant="flat"
+                      color="secondary"
+                      isDisabled={addingVideoId !== null}
+                      onPress={() => void handleAddVideo(result)}
+                      aria-label={`Thêm ${result.title} vào hàng đợi`}
+                      className="shrink-0"
+                    >
+                      {addingVideoId === result.videoId ? (
+                        <Spinner size="sm" color="current" />
+                      ) : (
+                        <Plus size={18} />
+                      )}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : submittedQuery ? (
+              <div className="p-6 text-center text-sm text-default-500">
+                Không tìm thấy kết quả cho “{submittedQuery}”.
+              </div>
+            ) : null}
+          </CardBody>
+        </Card>
       )}
     </div>
   );

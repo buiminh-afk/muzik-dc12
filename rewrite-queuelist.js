@@ -1,4 +1,9 @@
-'use client';
+const fs = require('fs');
+const path = require('path');
+
+const filePath = path.join(__dirname, 'src', 'components', 'QueueList.tsx');
+
+const content = `'use client';
 
 import { useState, useEffect, useMemo } from 'react';
 import { ListMusic, Disc, ArrowUpToLine, X, Music } from 'lucide-react';
@@ -35,9 +40,9 @@ function QueueThumbnail({
 }) {
   const candidates = useMemo(() => [
     rawThumbnail,
-    `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
-    `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-    `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+    \`https://i.ytimg.com/vi/\${videoId}/maxresdefault.jpg\`,
+    \`https://i.ytimg.com/vi/\${videoId}/hqdefault.jpg\`,
+    \`https://i.ytimg.com/vi/\${videoId}/mqdefault.jpg\`,
   ].filter((value): value is string => Boolean(value)), [videoId, rawThumbnail]);
 
   const [candidateIndex, setCandidateIndex] = useState(0);
@@ -63,7 +68,7 @@ function QueueThumbnail({
       ) : (
         <div
           role="img"
-          aria-label={`Không có ảnh bìa cho ${title}`}
+          aria-label={\`Không có ảnh bìa cho \${title}\`}
           className="flex h-full w-full items-center justify-center bg-content2 text-default-400"
         >
           <Music size={20} />
@@ -89,7 +94,7 @@ export default function QueueList({
 
   return (
     <>
-      <style>{`
+      <style>{\`
         @keyframes equalize {
           0%, 100% { transform: scaleY(0.4); }
           50% { transform: scaleY(1); }
@@ -104,7 +109,7 @@ export default function QueueList({
         .music-bar-paused {
           animation-play-state: paused !important;
         }
-      `}</style>
+      \`}</style>
       <div className="flex flex-col h-full w-full">
         <div className="flex items-center gap-2 mb-4 shrink-0 px-2 select-none">
           <ListMusic size={20} className="text-secondary" />
@@ -135,18 +140,18 @@ export default function QueueList({
                       onPlayItem(item.id);
                     }
                   }}
-                  className={`group relative flex flex-row items-center gap-4 px-4 py-3 w-full border transition-all duration-200 ${
+                  className={\`group relative flex flex-row items-center gap-4 px-4 py-3 w-full border transition-all duration-200 \${
                     isPlayingNow
                       ? 'bg-secondary/10 border-secondary/30'
                       : 'bg-content2 border-transparent hover:bg-content3 hover:border-default-100'
-                  }`}
+                  }\`}
                   shadow={isPlayingNow ? 'sm' : 'none'}
                   radius="lg"
                 >
                   <div className="w-6 shrink-0 flex items-center justify-center select-none">
-                    <span className={`text-sm transition-colors ${
+                    <span className={\`text-sm transition-colors \${
                       isPlayingNow ? 'text-secondary font-bold' : 'text-default-400 font-semibold group-hover:text-default-foreground'
-                    }`}>
+                    }\`}>
                       {index + 1}
                     </span>
                   </div>
@@ -159,20 +164,20 @@ export default function QueueList({
 
                   <div className="flex-1 min-w-0 overflow-hidden flex flex-col justify-center gap-1">
                     <h4
-                      className={`text-sm leading-snug truncate block w-full ${
+                      className={\`text-sm leading-snug truncate block w-full \${
                         isPlayingNow
                           ? 'font-bold text-secondary'
                           : isNextUp
-                          ? 'font-semibold text-cyan-400'
+                          ? 'font-semibold text-primary'
                           : 'font-semibold text-default-600 group-hover:text-foreground'
-                      }`}
+                      }\`}
                       title={item.title}
                     >
                       {item.title}
                     </h4>
 
                     <div className="text-xs text-default-500 flex items-center gap-2 flex-wrap">
-                      {isNextUp && <span className="text-cyan-400 select-none font-medium">▶ Tiếp theo •</span>}
+                      {isNextUp && <span className="text-primary/80 select-none font-medium">▶ Tiếp theo •</span>}
                       <span>Thêm bởi <span className="text-default-foreground font-medium">{item.addedBy}</span></span>
                       {item.duration && (
                         <span className="text-default-400 select-none">• {item.duration}</span>
@@ -186,7 +191,7 @@ export default function QueueList({
                           classNames={{ content: "px-1" }}
                         >
                           <div className="flex items-center gap-1">
-                            <span className={`w-1.5 h-1.5 rounded-full ${isPlaying ? 'bg-success animate-pulse' : 'bg-warning'}`} />
+                            <span className={\`w-1.5 h-1.5 rounded-full \${isPlaying ? 'bg-success animate-pulse' : 'bg-warning'}\`} />
                             {isPlaying ? 'ON AIR' : 'PAUSED'}
                           </div>
                         </Chip>
@@ -198,10 +203,10 @@ export default function QueueList({
                     {isPlayingNow ? (
                       <div className="flex items-center gap-1.5">
                         <div className="flex items-end justify-center gap-1 w-8 h-5 mr-1 group-hover:hidden">
-                          <div className={`music-bar h-full ${!isPlaying ? 'music-bar-paused' : ''}`} style={{ width: '4px', animationDelay: '0s' }} />
-                          <div className={`music-bar h-full ${!isPlaying ? 'music-bar-paused' : ''}`} style={{ width: '4px', animationDelay: '0.3s' }} />
-                          <div className={`music-bar h-full ${!isPlaying ? 'music-bar-paused' : ''}`} style={{ width: '4px', animationDelay: '0.6s' }} />
-                          <div className={`music-bar h-full ${!isPlaying ? 'music-bar-paused' : ''}`} style={{ width: '4px', animationDelay: '0.2s' }} />
+                          <div className={\`music-bar h-full \${!isPlaying ? 'music-bar-paused' : ''}\`} style={{ width: '4px', animationDelay: '0s' }} />
+                          <div className={\`music-bar h-full \${!isPlaying ? 'music-bar-paused' : ''}\`} style={{ width: '4px', animationDelay: '0.3s' }} />
+                          <div className={\`music-bar h-full \${!isPlaying ? 'music-bar-paused' : ''}\`} style={{ width: '4px', animationDelay: '0.6s' }} />
+                          <div className={\`music-bar h-full \${!isPlaying ? 'music-bar-paused' : ''}\`} style={{ width: '4px', animationDelay: '0.2s' }} />
                         </div>
                         {(isHost || item.addedBy === username) && (
                           <Button
@@ -261,3 +266,7 @@ export default function QueueList({
     </>
   );
 }
+`;
+
+fs.writeFileSync(filePath, content);
+console.log('Successfully updated QueueList.tsx with NextUI components');

@@ -224,10 +224,9 @@ export default function YoutubePlayer({
       .then((YT) => {
         if (cancelled) return;
 
-        player = new YT.Player(playerContainerId, {
+        const playerConfig: any = {
           height: '100%',
           width: '100%',
-          videoId: latestProps.current.videoId || '',
           host: 'https://www.youtube-nocookie.com',
           playerVars: {
             autoplay: latestProps.current.isPlaying ? 1 : 0,
@@ -322,8 +321,15 @@ export default function YoutubePlayer({
             onError: (errEvent: any) => {
               console.error('YouTube player error:', errEvent.data);
             }
-          },
-        });
+          }
+        };
+
+        const initialVideoId = latestProps.current.videoId;
+        if (initialVideoId) {
+          playerConfig.videoId = initialVideoId;
+        }
+
+        player = new YT.Player(playerContainerId, playerConfig);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -568,7 +574,7 @@ export default function YoutubePlayer({
         )}
 
         {/* Loading / Buffering Overlay */}
-        {(isBuffering || (!playerReady && videoId)) && !isWaitingForOthers && !isAutoplayBlocked && (
+        {(videoId && (isBuffering || !playerReady)) && !isWaitingForOthers && !isAutoplayBlocked && (
           <div
             className={`absolute inset-0 flex flex-col items-center justify-center z-25 animate-fade-in ${apiError ? '' : 'pointer-events-none'}`}
             style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}

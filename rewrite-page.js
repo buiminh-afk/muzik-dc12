@@ -1,8 +1,13 @@
-'use client';
+const fs = require('fs');
+const path = require('path');
 
-import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { Play, Users, ArrowRight, Headphones, Lock, Unlock, Plus, Search, User } from 'lucide-react';
+const filePath = path.join(__dirname, 'src', 'app', 'page.tsx');
+let content = fs.readFileSync(filePath, 'utf8');
+
+// 1. Replace imports
+content = content.replace(
+  "import { Play, Users, ArrowRight, Headphones, Lock, Unlock, Plus, X, Search, User } from 'lucide-react';",
+  `import { Play, Users, ArrowRight, Headphones, Lock, Unlock, Plus, Search, User } from 'lucide-react';
 import { 
   Button, 
   Card, 
@@ -20,189 +25,29 @@ import {
   Badge,
   Avatar,
   ScrollShadow
-} from "@nextui-org/react";
-import { getRealtimeChannel, supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { simpleHash } from '@/lib/utils';
-import { useToast } from '@/components/ToastContext';
-import styles from './page.module.css';
+} from "@nextui-org/react";`
+);
 
-export default function Home() {
-  const router = useRouter();
-  const { showToast } = useToast();
-  const [username, setUsername] = useState('');
-  const [activeRooms, setActiveRooms] = useState<any[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isPrivateRoom, setIsPrivateRoom] = useState(false);
+// 2. Add useDisclosure
+content = content.replace(
+  "const [isPrivateRoom, setIsPrivateRoom] = useState(false);",
+  `const [isPrivateRoom, setIsPrivateRoom] = useState(false);
   const createModal = useDisclosure();
-  
-  // Modals state
-  const [newRoomName, setNewRoomName] = useState('');
-  const [newRoomPass, setNewRoomPass] = useState('');
-  
-  // Ref để giữ kết nối lobby
-  const channelRef = useRef<any>(null);
+  const joinModal = useDisclosure();`
+);
 
-  useEffect(() => {
-    // Tự động lấy tên đã lưu nếu có
-    const savedName = localStorage.getItem('yt_together_username');
-    if (savedName) setUsername(savedName);
+// 3. Update the handle methods to use useDisclosure's onClose, we'll just leave them as they are and use onClose in the JSX.
 
-    // Khôi phục theme từ localStorage
-    const savedTheme = localStorage.getItem('yt_together_theme');
-    if (savedTheme) {
-      document.body.className = savedTheme;
-    } else {
-      document.body.className = 'dark';
-    }
+// 4. Replace the return statement
+const returnIndex = content.indexOf('  return (\n    <main');
+if (returnIndex === -1) {
+  console.error("Could not find return statement");
+  process.exit(1);
+}
 
-    // Khởi tạo kết nối Sảnh (Lobby)
-    const channel = getRealtimeChannel('lobby');
-    channelRef.current = channel;
+const beforeReturn = content.substring(0, returnIndex);
 
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const rooms: any[] = [];
-        
-        Object.values(state).forEach((presences: any) => {
-          presences.forEach((p: any) => {
-            if (p.type === 'room') {
-              rooms.push(p);
-            }
-          });
-        });
-        
-        // Loại bỏ các phòng trùng lặp ID (phòng hờ trường hợp host đổi tab)
-        const uniqueRooms = Array.from(new Map(rooms.map(r => [r.roomId, r])).values());
-        setActiveRooms(uniqueRooms);
-      })
-      .subscribe();
-
-    // Dọn dẹp các phòng không hoạt động trong DB định kỳ
-    let cleanupInterval: NodeJS.Timeout;
-    let initialTimeout: NodeJS.Timeout;
-
-    if (isSupabaseConfigured && supabase) {
-      const performCleanup = async () => {
-        try {
-          const state = channel.presenceState();
-          const activeRoomIds = new Set<string>();
-          Object.values(state).forEach((presences: any) => {
-            presences.forEach((p: any) => {
-              if (p.type === 'room' && p.roomId) {
-                activeRoomIds.add(p.roomId);
-              }
-            });
-          });
-
-          const { data: dbRooms, error } = await (supabase as any)
-            .from('rooms')
-            .select('id, updated_at');
-
-          if (error) {
-            console.error('[Lobby Cleanup] Lỗi truy vấn DB:', error);
-            return;
-          }
-
-          if (dbRooms && dbRooms.length > 0) {
-            const roomsToDelete: string[] = [];
-            const now = Date.now();
-
-            (dbRooms as any[]).forEach(room => {
-              if (!activeRoomIds.has(room.id)) {
-                const updatedAt = room.updated_at ? new Date(room.updated_at).getTime() : 0;
-                // Nếu phòng không có trong presence và đã lâu không cập nhật (ví dụ > 30s) thì xoá
-                if (now - updatedAt > 30 * 1000) {
-                  roomsToDelete.push(room.id);
-                }
-              }
-            });
-
-            if (roomsToDelete.length > 0) {
-              console.log('[Lobby Cleanup] Phát hiện các phòng trống, đang xoá:', roomsToDelete);
-              const { error: deleteError } = await (supabase as any)
-                .from('rooms')
-                .delete()
-                .in('id', roomsToDelete);
-              
-              if (deleteError) {
-                console.error('[Lobby Cleanup] Lỗi xoá phòng:', deleteError);
-              }
-            }
-          }
-        } catch (err) {
-          console.error('[Lobby Cleanup] Lỗi dọn dẹp:', err);
-        }
-      };
-
-      // Chạy lần đầu sau 3 giây để đợi Presence sync xong
-      initialTimeout = setTimeout(performCleanup, 3000);
-      // Chạy định kỳ mỗi 60 giây
-      cleanupInterval = setInterval(performCleanup, 60000);
-    }
-
-    return () => {
-      channel.unsubscribe();
-      if (initialTimeout) clearTimeout(initialTimeout);
-      if (cleanupInterval) clearInterval(cleanupInterval);
-    };
-  }, []);
-
-  const generateRoomId = () => {
-    return Math.random().toString(36).substring(2, 9).toUpperCase();
-  };
-
-  const handleCreateRoom = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username.trim()) {
-      showToast('Vui lòng nhập tên của bạn trước!');
-      return;
-    }
-    
-    const name = username.trim();
-    const rName = newRoomName.trim() || `Phòng của ${name}`;
-    const newRoomId = generateRoomId();
-    
-    localStorage.setItem('yt_together_username', name);
-    
-    const hasPass = isPrivateRoom && !!newRoomPass;
-    const passHash = hasPass ? simpleHash(newRoomPass) : null;
-    
-    // Lưu cấu hình phòng vào sessionStorage để RoomClient đọc
-    sessionStorage.setItem(`yt_room_config_${newRoomId}`, JSON.stringify({
-      roomName: rName,
-      hasPassword: hasPass,
-      passwordHash: passHash
-    }));
-    
-    router.push(`/room/${newRoomId}`);
-  };
-
-  const handleRoomClick = (room: any) => {
-    if (!username.trim()) {
-      showToast('Vui lòng nhập tên của bạn trước khi vào phòng!');
-      return;
-    }
-    
-    localStorage.setItem('yt_together_username', username.trim());
-    router.push(`/room/${room.roomId}`);
-  };
-
-  // Lọc phòng theo từ khóa tìm kiếm
-  const filteredRooms = activeRooms.filter(room => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return true;
-    return (
-      (room.roomName || '').toLowerCase().includes(q) ||
-      (room.roomId || '').toLowerCase().includes(q) ||
-      (room.hostName || '').toLowerCase().includes(q)
-    );
-  });
-
-  // Tính tổng số user đang online
-  const totalUsers = activeRooms.reduce((acc, room) => acc + (room.userCount || 1), 0);
-
-  return (
+const newReturn = `  return (
     <main className="h-screen w-full bg-background flex flex-col items-center overflow-hidden">
       <div className="flex flex-col h-full w-full max-w-7xl mx-auto p-4 md:p-8 relative z-10 gap-6">
         
@@ -353,7 +198,7 @@ export default function Home() {
                   <Input 
                     autoFocus
                     label="Tên phòng"
-                    placeholder={`Phòng của ${username}`}
+                    placeholder={\`Phòng của \${username}\`}
                     value={newRoomName}
                     onValueChange={setNewRoomName}
                     variant="bordered"
@@ -388,6 +233,44 @@ export default function Home() {
           )}
         </ModalContent>
       </Modal>
+
+      {/* Modal Nhập Mật Khẩu */}
+      <Modal isOpen={joinModal.isOpen} onOpenChange={joinModal.onOpenChange} backdrop="blur">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex flex-col gap-1 text-center">Tham Gia Phòng</ModalHeader>
+              <ModalBody>
+                <div className="flex flex-col items-center gap-2 mb-4">
+                  <Avatar icon={<Lock size={24} />} color="danger" className="w-16 h-16" />
+                  <h3 className="font-bold text-xl">{selectedRoom?.roomName}</h3>
+                  <p className="text-sm text-default-500">Phòng này yêu cầu mật khẩu để tham gia</p>
+                </div>
+                <form id="join-room-form" onSubmit={(e) => { handleJoinWithPass(e); }} className="flex flex-col gap-4">
+                  <Input 
+                    autoFocus
+                    type="password"
+                    placeholder="Nhập mật khẩu..."
+                    value={joinPass}
+                    onValueChange={setJoinPass}
+                    isInvalid={!!joinError}
+                    errorMessage={joinError}
+                    variant="bordered"
+                  />
+                </form>
+              </ModalBody>
+              <ModalFooter>
+                <Button color="default" variant="light" onPress={onClose}>Hủy</Button>
+                <Button color="danger" type="submit" form="join-room-form">Mở Khóa</Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
     </main>
   );
 }
+`;
+
+fs.writeFileSync(filePath, beforeReturn + newReturn);
+console.log('Successfully updated page.tsx with NextUI components');
