@@ -28,7 +28,7 @@ import {
   Lock,
   MoreVertical,
   Headphones,
-  PictureInPicture2
+  X
 } from 'lucide-react';
 import 'intro.js/introjs.css';
 
@@ -61,11 +61,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   }, []);
 
   const toggleTheme = () => {
-    const newTheme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(newTheme);
-    localStorage.setItem('yt_together_theme', newTheme);
-    document.documentElement.classList.remove('dark', 'light');
-    document.documentElement.classList.add(newTheme);
+    setTheme(prev => {
+      const newTheme = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('yt_together_theme', newTheme);
+      document.documentElement.classList.remove('dark', 'light');
+      document.documentElement.classList.add(newTheme);
+      return newTheme;
+    });
   };
 
   // State quản lý kết nối & user
@@ -201,20 +203,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   };
 
   // Stable callback refs để bridge useRoomSync ↔ useQueue mà không tạo circular dependency
-  // useRoomSync được khởi tạo trước, nhưng closures trong hook sẽ đọc qua refs này
-  // nên luôn gọi đúng hàm thực tế từ useQueue dù thứ tự khởi tạo
   const setQueueRef = useRef<React.Dispatch<React.SetStateAction<PlaylistItem[]>>>(() => {});
   const setIsPlayingRef = useRef<React.Dispatch<React.SetStateAction<boolean>>>(() => {});
   const setSeekTimeRef = useRef<React.Dispatch<React.SetStateAction<number | null>>>(() => {});
-  // Pointer refs – sau khi useQueue init, ta trỏ vào đúng ref gốc
-  // Supabase closures đọc qua pointer, nên luôn lấy dữ liệu live
   const sharedQueueRef = useRef<PlaylistItem[]>([]);
   const sharedIsPlayingRef = useRef<boolean>(false);
-  // ref-to-ref: trỏ đến queueRef/isPlayingRef thực của useQueue
   const queueRefPtr = useRef<React.MutableRefObject<PlaylistItem[]>>(sharedQueueRef);
   const isPlayingRefPtr = useRef<React.MutableRefObject<boolean>>(sharedIsPlayingRef);
 
-  // Proxy refs để useRoomSync luôn đọc được giá trị mới nhất qua pointer
   const proxyQueueRef = useMemo(() => ({
     get current() { return queueRefPtr.current.current; },
     set current(v) { queueRefPtr.current.current = v; }
@@ -293,15 +289,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   });
 
   // Kết nối refs ổn định với các hàm thực từ useQueue
-  // Mỗi render đều cập nhật để luôn trỏ đến phiên bản mới nhất
   setQueueRef.current = setQueue;
   setIsPlayingRef.current = setIsPlaying;
   setSeekTimeRef.current = setSeekTime;
-  // Trỏ pointer vào đúng ref gốc từ useQueue – closures giờ luôn đọc được giá trị live
   queueRefPtr.current = queueRef;
   isPlayingRefPtr.current = isPlayingRef;
 
-  // Gán refs và callbacks cần thiết cho useRoomSync hoạt động đúng
   playNextSongRef.current = playNextSong;
 
   // 3. Hook useChatCommands
@@ -429,7 +422,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           setHasLoadedName(true);
           localStorage.setItem('yt_together_username', name);
         }
-        // Không lưu trạng thái xác thực vào sessionStorage để bắt buộc nhập lại khi reload trang
         setAuthStatus('authenticated');
       } else {
         setPasswordError(data.error || 'Mật khẩu không chính xác!');
@@ -453,8 +445,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           .single();
 
         if (error || !room) {
-          console.log('[RoomClient] Không tìm thấy phòng, đang khởi tạo...');
-          
           let hasPassword = false;
           let passwordHash = null;
           try {
@@ -488,7 +478,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             addSystemMessage('👑 Bạn đã khởi tạo phòng và trở thành Chủ phòng!');
           }
         } else {
-          console.log('[RoomClient] Đã tìm thấy phòng, đồng bộ dữ liệu...');
           const rawName = (room as any).name || '';
           if (rawName.includes(':::pw_')) {
             setRoomName(rawName.split(':::pw_')[0]);
@@ -511,7 +500,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     initRoom();
   }, [username, roomId, authStatus]);
 
-  // Định kỳ cập nhật thời gian phát nhạc từ Host lên DB (mỗi 5s)
   useEffect(() => {
     if (!isSupabaseConfigured || !isPlaying) return;
     const isCurrentHost = dbHostClientId === clientIdRef.current;
@@ -526,7 +514,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     return () => clearInterval(interval);
   }, [isPlaying, dbHostClientId]);
 
-  // Cập nhật số lượng người trong phòng lên Lobby Presence
   useEffect(() => {
     if (authStatus !== 'authenticated') return;
     if (!lobbyChannelRef.current || !username) return;
@@ -554,7 +541,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     } catch (e) {}
   }, [users, username, roomId, roomName]);
 
-  // Reset videoFinished status when the current video changes
   const currentVideo = queue.length > 0 ? queue[0] : null;
   const currentItemId = currentVideo ? currentVideo.id : null;
   useEffect(() => {
@@ -575,7 +561,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     } catch (e) {}
   }, [currentItemId, username]);
 
-  // Gửi tin nhắn chat thông thường
   const handleSendMessage = (text: string) => {
     if (!channelRef.current) return;
     
@@ -634,11 +619,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       amIHost = oldestUser?.clientId === clientIdRef.current;
     }
 
-    // Reset lại cờ sync để cho phép nhận lại dữ liệu đồng bộ
     hasReceivedInitialSyncRef.current = false;
 
     if (amIHost) {
-      // Host tự sync cho toàn phòng (broadcast tất cả mọi người)
       channelRef.current.send({
         type: 'broadcast',
         event: 'sync_state',
@@ -647,14 +630,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           isPlaying: isPlayingRef.current,
           currentTime: playerTimeRef.current,
           sentAt: Date.now(),
-          targetRef: 'all',          // broadcast toàn phòng
-          isForced: true,            // bỏ qua lock "đã sync 1 lần"
+          targetRef: 'all',
+          isForced: true,
           hostClientId: dbHostClientIdRef.current
         }
       });
       showToast('🔄 Đã đồng bộ nhạc cho toàn phòng!');
     } else {
-      // Client yêu cầu Host gửi lại trạng thái, kèm flag isForced
       channelRef.current.send({
         type: 'broadcast',
         event: 'request_sync',
@@ -668,6 +650,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       showToast('🔄 Đang đồng bộ lại nhạc...');
     }
   };
+
+
 
   const handleStartTour = () => {
     import('intro.js').then(({ default: intro }) => {

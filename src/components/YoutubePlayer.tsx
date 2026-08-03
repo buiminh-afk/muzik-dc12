@@ -409,10 +409,16 @@ export default function YoutubePlayer({
     }
   }, [seekTime, videoId, playerReady, isPlaying]);
 
+
   // Handle volume/mute updates
   useEffect(() => {
     if (!playerReady || !playerRef.current) return;
-    playerRef.current.setVolume(isMuted ? 0 : volume);
+    if (isMuted) {
+      playerRef.current.mute();
+    } else {
+      playerRef.current.unMute();
+      playerRef.current.setVolume(volume);
+    }
   }, [volume, isMuted, playerReady]);
 
   // Autoplay fallback check
@@ -507,7 +513,7 @@ export default function YoutubePlayer({
   };
 
   return (
-    <div className="flex flex-col gap-3 h-full">
+    <div className="flex flex-col h-full gap-3">
       <div className="flex justify-between items-center mb-2">
         <span className="text-xs text-muted flex items-center gap-2 font-semibold uppercase tracking-wider">
           <Music size={15} className="text-purple-400" />
@@ -640,9 +646,8 @@ export default function YoutubePlayer({
           }}
         >
           <div className="w-full h-full">
-            <div ref={containerRef} id={playerContainerId} className="w-full h-full" />
+            <div ref={containerRef} id={playerContainerId} className="w-full h-full pointer-events-none" />
           </div>
-          {/* Overlay to block direct interactions and force chat controls */}
           <div className="absolute inset-0 z-20 bg-transparent cursor-default" />
         </div>
 
@@ -721,14 +726,13 @@ export default function YoutubePlayer({
       {/* UINIFIED TIMELINE & VOLUME CONTROL BAR */}
       {videoId && (
         <div 
-          className="bg-white-02 border border-white-5 rounded-xl flex-shrink-0"
+          className="bg-white-02 border border-white-5 rounded-xl flex-shrink-0 transition-all px-4 py-3"
           style={{
             display: 'flex',
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '20px',
-            padding: '12px'
           }}
         >
           
