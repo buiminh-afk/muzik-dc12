@@ -140,6 +140,7 @@ export default function YoutubePlayer({
 }: YoutubePlayerProps) {
   const playerContainerId = `yt-player-${roomId}`;
   const playerRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [volume, setVolume] = useState(100);
   const [isMuted, setIsMuted] = useState(false);
@@ -319,7 +320,7 @@ export default function YoutubePlayer({
               setIsAutoplayBlocked(true);
             },
             onError: (errEvent: any) => {
-              console.error('YouTube player error:', errEvent.data);
+              console.warn('YouTube player warning:', errEvent.data);
             }
           }
         };
@@ -329,7 +330,11 @@ export default function YoutubePlayer({
           playerConfig.videoId = initialVideoId;
         }
 
-        player = new YT.Player(playerContainerId, playerConfig);
+        if (containerRef.current) {
+          player = new YT.Player(containerRef.current, playerConfig);
+        } else {
+          console.error("Player container ref is missing");
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -634,7 +639,9 @@ export default function YoutubePlayer({
             zIndex: 10
           }}
         >
-          <div id={playerContainerId} className="w-full h-full" />
+          <div className="w-full h-full">
+            <div ref={containerRef} id={playerContainerId} className="w-full h-full" />
+          </div>
           {/* Overlay to block direct interactions and force chat controls */}
           <div className="absolute inset-0 z-20 bg-transparent cursor-default" />
         </div>

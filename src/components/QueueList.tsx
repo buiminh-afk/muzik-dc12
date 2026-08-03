@@ -127,21 +127,20 @@ export default function QueueList({
               const isNextUp = currentIndex >= 0 ? index === currentIndex + 1 : index === 0;
 
               return (
-                <Card
+                <div
                   key={item.id}
-                  isPressable={isHost && !isPlayingNow}
-                  onPress={() => {
+                  onClick={() => {
                     if (isHost && !isPlayingNow) {
                       onPlayItem(item.id);
                     }
                   }}
-                  className={`group relative flex flex-row items-center gap-4 px-4 py-3 w-full border transition-all duration-200 ${
+                  className={`rounded-lg group relative flex flex-row items-center gap-4 px-4 py-3 w-full shrink-0 text-left border transition-all duration-200 ${
+                    isHost && !isPlayingNow ? 'cursor-pointer' : ''
+                  } ${
                     isPlayingNow
-                      ? 'bg-secondary/10 border-secondary/30'
-                      : 'bg-content2 border-transparent hover:bg-content3 hover:border-default-100'
+                      ? 'bg-secondary/10 border-secondary/30 shadow-sm'
+                      : 'bg-content2 border-transparent hover:bg-content3 hover:border-default-100 shadow-none'
                   }`}
-                  shadow={isPlayingNow ? 'sm' : 'none'}
-                  radius="lg"
                 >
                   <div className="w-6 shrink-0 flex items-center justify-center select-none">
                     <span className={`text-sm transition-colors ${
@@ -157,7 +156,7 @@ export default function QueueList({
                     rawThumbnail={item.thumbnail}
                   />
 
-                  <div className="flex-1 min-w-0 overflow-hidden flex flex-col justify-center gap-1">
+                  <div className="flex-1 min-w-0 overflow-hidden flex flex-col justify-center items-start text-left gap-1">
                     <h4
                       className={`text-sm leading-snug truncate block w-full ${
                         isPlayingNow
@@ -252,7 +251,7 @@ export default function QueueList({
                       </div>
                     )}
                   </div>
-                </Card>
+                </div>
               );
             })
           )}

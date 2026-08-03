@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Chip, Avatar } from "@nextui-org/react";
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -27,7 +27,8 @@ import {
   VideoOff,
   Lock,
   MoreVertical,
-  Headphones
+  Headphones,
+  PictureInPicture2
 } from 'lucide-react';
 import 'intro.js/introjs.css';
 
@@ -214,19 +215,15 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const isPlayingRefPtr = useRef<React.MutableRefObject<boolean>>(sharedIsPlayingRef);
 
   // Proxy refs để useRoomSync luôn đọc được giá trị mới nhất qua pointer
-  const proxyQueueRef = useRef<PlaylistItem[]>([]);
-  const proxyIsPlayingRef = useRef<boolean>(false);
-  // Đây là "live" getter: đọc từ pointer target
-  Object.defineProperty(proxyQueueRef, 'current', {
-    get: () => queueRefPtr.current.current,
-    set: (v) => { queueRefPtr.current.current = v; },
-    configurable: true,
-  });
-  Object.defineProperty(proxyIsPlayingRef, 'current', {
-    get: () => isPlayingRefPtr.current.current,
-    set: (v) => { isPlayingRefPtr.current.current = v; },
-    configurable: true,
-  });
+  const proxyQueueRef = useMemo(() => ({
+    get current() { return queueRefPtr.current.current; },
+    set current(v) { queueRefPtr.current.current = v; }
+  }), []) as React.MutableRefObject<PlaylistItem[]>;
+
+  const proxyIsPlayingRef = useMemo(() => ({
+    get current() { return isPlayingRefPtr.current.current; },
+    set current(v) { isPlayingRefPtr.current.current = v; }
+  }), []) as React.MutableRefObject<boolean>;
 
   // 1. Hook useRoomSync
   const { channelRef, lobbyChannelRef } = useRoomSync({
@@ -543,17 +540,19 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       }
     } catch (e) {}
 
+    const currentHost = users.find(u => u.isHost)?.username || username;
+
     try {
       lobbyChannelRef.current?.track?.({
         type: 'room',
         roomId,
         roomName: roomName,
-        hostName: username,
+        hostName: currentHost,
         hasPassword: hasPassword,
         userCount: Math.max(1, users.length)
       })?.catch((err: any) => console.warn('Lobby track error:', err));
     } catch (e) {}
-  }, [users.length, username, roomId, roomName]);
+  }, [users, username, roomId, roomName]);
 
   // Reset videoFinished status when the current video changes
   const currentVideo = queue.length > 0 ? queue[0] : null;
@@ -983,38 +982,38 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
         {/* TOOLBAR BUTTONS - DESKTOP */}
         <div className="hidden md:flex items-center gap-3">
-          <Button isIconOnly size="sm" variant="flat" color="secondary" onClick={toggleTheme} title={theme === 'dark' ? 'Chuyển sang nền Sáng' : 'Chuyển sang nền Tối'}>
+          <Button isIconOnly size="sm" variant="flat" color="secondary" onPress={toggleTheme} title={theme === 'dark' ? 'Chuyển sang nền Sáng' : 'Chuyển sang nền Tối'}>
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </Button>
 
-          <Button isIconOnly size="sm" variant="flat" onClick={handleManualSync} title="Đồng bộ lại">
+          <Button isIconOnly size="sm" variant="flat" onPress={handleManualSync} title="Đồng bộ lại">
             <RefreshCw size={16} />
           </Button>
           
-          <Button isIconOnly size="sm" variant="flat" onClick={() => setIsTheaterMode(!isTheaterMode)} title="Chế độ rạp hát">
+          <Button isIconOnly size="sm" variant="flat" onPress={() => setIsTheaterMode(!isTheaterMode)} title="Chế độ rạp hát">
             <MonitorPlay size={16} />
           </Button>
 
-          <Button isIconOnly size="sm" variant="flat" color={isVideoHidden ? "danger" : "default"} onClick={() => setIsVideoHidden(!isVideoHidden)} title={isVideoHidden ? "Hiện video" : "Ẩn video"}>
+          <Button isIconOnly size="sm" variant="flat" color={isVideoHidden ? "danger" : "default"} onPress={() => setIsVideoHidden(!isVideoHidden)} title={isVideoHidden ? "Hiện video" : "Ẩn video"}>
             {isVideoHidden ? <VideoOff size={16} /> : <Video size={16} />}
           </Button>
 
-          <Button isIconOnly size="sm" variant="flat" onClick={handleStartTour} title="Hướng dẫn sử dụng">
+          <Button isIconOnly size="sm" variant="flat" onPress={handleStartTour} title="Hướng dẫn sử dụng">
             <HelpCircle size={16} />
           </Button>
 
-          <Button size="sm" variant="flat" color="primary" onClick={handleCopyLink} startContent={<Share2 size={16} />}>
+          <Button size="sm" variant="flat" color="primary" onPress={handleCopyLink} startContent={<Share2 size={16} />}>
             Mời Bạn Bè
           </Button>
           
-          <Button size="sm" variant="flat" color="danger" onClick={handleLeaveRoom} startContent={<LogOut size={16} />}>
+          <Button size="sm" variant="flat" color="danger" onPress={handleLeaveRoom} startContent={<LogOut size={16} />}>
             Rời Phòng
           </Button>
         </div>
 
         {/* MOBILE OVERFLOW MENU */}
         <div className="flex md:hidden items-center gap-2">
-          <Button isIconOnly size="sm" variant="flat" color="secondary" onClick={toggleTheme}>
+          <Button isIconOnly size="sm" variant="flat" color="secondary" onPress={toggleTheme}>
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </Button>
 
@@ -1034,7 +1033,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
                 case "leave": handleLeaveRoom(); break;
               }
             }}>
-              <DropdownItem key="sync" startContent={<RefreshCw size={16} />}>Đồng bộ nhạc</DropdownItem>
               <DropdownItem key="theater" startContent={<MonitorPlay size={16} />}>Chế độ rạp hát</DropdownItem>
               <DropdownItem key="video" startContent={isVideoHidden ? <Video size={16} /> : <VideoOff size={16} />}>{isVideoHidden ? 'Hiện video' : 'Ẩn video'}</DropdownItem>
               <DropdownItem key="help" startContent={<HelpCircle size={16} />}>Hướng dẫn sử dụng</DropdownItem>
@@ -1056,7 +1054,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
         {/* MIDDLE COLUMN: Video Player & QueueList */}
         <main className={`${isTheaterMode ? 'lg:col-span-9' : 'lg:col-span-6'} min-h-0 flex flex-col gap-4 overflow-hidden transition-all duration-300 order-1 lg:order-2`}>
-          <Card className="p-4 shrink-0 overflow-hidden relative bg-content1/50 border-none shadow-lg">
+          <Card className="p-4 shrink-0 overflow-hidden relative bg-content1/50 border-none shadow-lg transition-all duration-300">
             <div 
               className="shrink-0 overflow-hidden relative rounded-xl"
               style={{ height: isTheaterMode ? 'clamp(300px, 60vh, 600px)' : 'clamp(200px, 42vh, 480px)', transition: 'height 0.3s' }}
