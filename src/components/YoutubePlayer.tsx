@@ -154,6 +154,34 @@ export default function YoutubePlayer({
   const [retryCount, setRetryCount] = useState(0);
   const endedTriggeredRef = useRef<string | null>(null);
 
+  // Tự động kích hoạt phát nhạc khi người dùng click bất kỳ đâu trên trang (bỏ chặn autoplay)
+  useEffect(() => {
+    if (!isAutoplayBlocked || !playerReady || !playerRef.current) return;
+
+    const handleGlobalClick = () => {
+      const player = playerRef.current;
+      if (player && typeof player.playVideo === 'function') {
+        try {
+          setIsMuted(false);
+          setIsAutoplayBlocked(false);
+          player.unMute();
+          player.playVideo();
+        } catch (e) {
+          console.warn('[Autoplay] Không thể phát nhạc qua click toàn cục:', e);
+        }
+      }
+    };
+
+    // Lắng nghe cả click và touch
+    document.addEventListener('click', handleGlobalClick, { once: true });
+    document.addEventListener('touchstart', handleGlobalClick, { once: true });
+
+    return () => {
+      document.removeEventListener('click', handleGlobalClick);
+      document.removeEventListener('touchstart', handleGlobalClick);
+    };
+  }, [isAutoplayBlocked, playerReady]);
+
   // Reset ended trigger when videoId changes
   useEffect(() => {
     endedTriggeredRef.current = null;
@@ -318,6 +346,16 @@ export default function YoutubePlayer({
             onAutoplayBlocked: () => {
               if (cancelled) return;
               setIsAutoplayBlocked(true);
+              // Tự động tắt tiếng và phát tiếp để đồng bộ video, sau đó người dùng click bất cứ đâu sẽ tự bật lại tiếng
+              try {
+                if (playerRef.current && typeof playerRef.current.mute === 'function') {
+                  playerRef.current.mute();
+                  setIsMuted(true);
+                  playerRef.current.playVideo();
+                }
+              } catch (e) {
+                console.warn('[Autoplay] Lỗi tự động tắt tiếng:', e);
+              }
             },
             onError: (errEvent: any) => {
               console.warn('YouTube player warning:', errEvent.data);
@@ -534,8 +572,10 @@ export default function YoutubePlayer({
             className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 backdrop-blur-md z-30 transition-all cursor-pointer animate-fade-in"
             onClick={() => {
               setIsAutoplayBlocked(false);
+              setIsMuted(false);
               const player = playerRef.current;
               if (player && typeof player.playVideo === 'function') {
+                player.unMute();
                 player.playVideo();
               }
             }}
